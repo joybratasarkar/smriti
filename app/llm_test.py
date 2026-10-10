@@ -30,6 +30,7 @@ DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M"]  # qwen3.5:4b dropped: does n
 USER_AGENT = "Mozilla/5.0 (compatible; smriti-news-archive/0.1)"
 MAX_TEXT_CHARS = 6000   # keeps prompt + output inside the context window on a 4 GB GPU
 NUM_CTX = 4096
+MAX_EVENTS = 5          # output length is the main cost (~38 tok/s); minor events are mostly noise
 NUM_GPU = 99            # force all layers onto the GPU; Ollama's own estimate leaves ~30% on CPU
 
 ACTION_TYPES = ["protest", "arrest_detention", "statement", "court", "policy_decision",
@@ -40,6 +41,7 @@ EVENT_SCHEMA = {
     "properties": {
         "events": {
             "type": "array",
+            "maxItems": MAX_EVENTS,
             "items": {
                 "type": "object",
                 "properties": {
@@ -58,7 +60,8 @@ EVENT_SCHEMA = {
 }
 
 SYSTEM_PROMPT = """You extract news events from one article. Report only what the article states; do not add conclusions.
-For each distinct event in the article give:
+List at most """ + str(MAX_EVENTS) + """ events: the most important distinct events in the article, skipping background and minor details.
+For each event give:
 - who: people and organizations involved, full names as written in the article
 - what: one short sentence describing what happened, attributed (e.g. "Police detained ...", "X said ...")
 - when: date or time of the event as stated in the article, else null
