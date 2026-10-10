@@ -21,7 +21,7 @@ _Last updated: 2026-10-10_
 - **GPU status (2026-10-10, late):** nvidia-driver-595 installed (replaced 580, DKMS modules built). MOK key re-queued (first reboot missed the enrollment screen). Ollama still 0.1.38. Next (the user runs these): `curl -fsSL https://ollama.com/install.sh | sh`, then `sudo reboot` → on the blue MOK screen press a key fast → Enroll MOK, Continue, Yes, password, Reboot. Then check `nvidia-smi`, `ollama pull qwen3.5:4b` and the backup, and run the test.
 - **Blocker, GPU:** GTX 1650 (4 GB) driver (now nvidia-595) is built, but Secure Boot rejects it because the MOK key isn't enrolled. Fix (the user runs it): `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der`, reboot, Enroll MOK, then check with `nvidia-smi`. Then upgrade Ollama (0.1.38 is too old): `curl -fsSL https://ollama.com/install.sh | sh`. Leftover `nvidia-driver-535` package can be removed later. Laptop has 7.1 GB RAM, so models above ~4B won't fit.
 - **Still open from grilling round 2:** Q7 full text at extraction time (fetch, then discard), Q8 issue definition, Q9 merge whole event clusters, Q10 entity canonical name plus `entity_aliases`.
-- **Next:** the design discussion for extraction and merging is in progress (no code yet). Open questions: which LLM, whether to read full article text at extraction time without storing it, and how entities are normalized. Per CLAUDE.md, propose an approach and wait for an OK before coding.
+- **Next:** the design discussion for extraction and merging is in progress (no code yet). Open questions: whether to read full article text at extraction time without storing it, and how entities are normalized. Per CLAUDE.md, propose an approach and wait for an OK before coding.
 
 ## Data snapshot (2026-10-10)
 
