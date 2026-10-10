@@ -11,6 +11,15 @@ _Last updated: 2026-10-10_
   - Merging events into issues will use **structured facts** (people, organizations, places, action types, dates) **plus an LLM judgment**.
   - The graph stays in **plain Postgres tables**, with no separate graph database.
   - Evidence: 87 separate "issues" in the DB are all about the CJP / Jantar Mantar protest.
+- **Grilling round 1 (2026-10-10), all accepted:**
+  1. Exception: near-duplicates (cosine ≥ 0.90) join the same event cluster automatically. Every issue-level merge goes to the LLM.
+  2. Candidate = cosine ≥ ~0.45 to any event of the issue **or** at least one shared key person/org; only issues active in the last 30 days; top 5 go to the LLM. Thresholds to be measured on the CJP set.
+  3. People/orgs are the strong signal and can make a candidate alone. Places, action types and dates are context for the LLM, never filters.
+  4. The LLM decides automatically. Store verdict, reason, evidence and model; every merge is reversible; review page later.
+  5. Typed tables (`issues`, `events`, `entities`) plus link tables, not a generic nodes/edges table.
+- **LLM decided (2026-10-10):** use a **local open-source model on the GPU** (Ollama), not the Claude API. Candidates: Qwen3.5-4B, Gemma 3 4B (must fit 4 GB VRAM). Test on ~30 CJP articles first.
+- **Blocker, GPU:** GTX 1650 (4 GB) driver nvidia-580 is built, but Secure Boot rejects it because the MOK key isn't enrolled. Fix (the user runs it): `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der`, reboot, Enroll MOK, then check with `nvidia-smi`. Then upgrade Ollama (0.1.38 is too old): `curl -fsSL https://ollama.com/install.sh | sh`. Leftover `nvidia-driver-535` package can be removed later. Laptop has 7.1 GB RAM, so models above ~4B won't fit.
+- **Still open from grilling round 2:** Q7 full text at extraction time (fetch, then discard), Q8 issue definition, Q9 merge whole event clusters, Q10 entity canonical name plus `entity_aliases`.
 - **Next:** the design discussion for extraction and merging is in progress (no code yet). Open questions: which LLM, whether to read full article text at extraction time without storing it, and how entities are normalized. Per CLAUDE.md, propose an approach and wait for an OK before coding.
 
 ## Data snapshot (2026-10-10)
