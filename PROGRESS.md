@@ -71,7 +71,7 @@ To stop them: `pkill -f "uvicorn app.api"; pkill -f vite`
 - `/refresh` (`.claude/skills/refresh`): runs fetch → embed → group in order, reports what changed, and updates the data snapshot.
 - `/handoff` (`.claude/skills/handoff`): updates this file (and TECHNICAL.md if needed) and commits. Run it before closing the terminal.
 - `.claude/skills/grill-me` and `.claude/skills/grilling` (from github.com/mattpocock/skills): `/grill-me` runs a round-by-round interview to stress-test a design. Added 2026-10-10.
-- caveman (github.com/JuliusBrussee/caveman): full install requested, but auto mode blocked the global install (its proxy and telemetry). The user has to run it themselves; see the 2026-10-10 log entry.
+- caveman (github.com/JuliusBrussee/caveman): CLI v2.1.0 installed globally by the user on 2026-10-10. Adds hooks to ~/.claude/settings.json (proxy + shrink) and the `caveman` skill. Telemetry is ON (turn off: `caveman telemetry off`). Turn terse mode on with `/caveman`, off with "normal mode".
 
 ## Log
 
