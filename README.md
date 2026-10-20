@@ -14,7 +14,15 @@ Accuracy rules: every event must be traceable to a source article, and we store 
 | Understand: local LLM extracts events (who, what, when, where, quote) | Testing |
 | Remember: issues → events → people/orgs as Postgres tables, LLM-judged merges | Designed |
 
-Details: [`PROGRESS.md`](PROGRESS.md) (current state and next step), [`WORKFLOW.md`](WORKFLOW.md) (diagrams of what is built and decided), [`TECHNICAL.md`](TECHNICAL.md) (sources, schema, algorithms).
+Where things stand:
+
+| File | Answers |
+|---|---|
+| [`PROGRESS.md`](PROGRESS.md) | Where are we now, and what's next? |
+| [`docs/ISSUES.md`](docs/ISSUES.md) | What's broken or uncertain, and can it be fixed? |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | What did we decide, and why? |
+| [`docs/WORKFLOW.md`](docs/WORKFLOW.md) | Diagrams: pipeline, issue board, merge design |
+| [`docs/TECHNICAL.md`](docs/TECHNICAL.md) | How it works: sources, schema, algorithms, API |
 
 ## Stack
 
@@ -66,5 +74,6 @@ app/          Python: fetch, embed, group, api, review tools, llm_test
 frontend/     Svelte UI (issue list, timeline per issue)
 schema.sql    all tables; the only schema file
 feeds.txt     RSS sources
+docs/         issues, decisions, diagrams, technical notes
 logs/         run logs (git-ignored)
 ```

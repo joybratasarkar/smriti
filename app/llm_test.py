@@ -34,7 +34,7 @@ MAX_EVENTS = 5          # output length is the main cost (~38 tok/s); minor even
 NUM_GPU = 99            # force all layers onto the GPU; Ollama's own estimate leaves ~30% on CPU
 
 ACTION_TYPES = ["protest", "arrest_detention", "statement", "court", "policy_decision",
-                "police_action", "election", "violence", "announcement", "other"]
+                "police_action", "election", "violence", "announcement", "demand", "warning", "other"]
 
 EVENT_SCHEMA = {
     "type": "object",
@@ -61,13 +61,16 @@ EVENT_SCHEMA = {
 
 SYSTEM_PROMPT = """You extract news events from one article. Report only what the article states; do not add conclusions.
 List at most """ + str(MAX_EVENTS) + """ events: the most important distinct events in the article, skipping background and minor details.
+Rules:
+- Only events that happened or were actually said. Something that "could", "may" or "is planned to" happen is not an event, unless it is someone's statement (then action_type is statement or warning).
+- Each event once. Do not list the same event twice with different wording.
 For each event give:
-- who: people and organizations involved, full names as written in the article
+- who: names of people and organizations involved, exactly as written in the article. Never expand an acronym unless the article itself expands it. No descriptions ("his brother"), objects or systems.
 - what: one short sentence describing what happened, attributed (e.g. "Police detained ...", "X said ...")
 - when: date or time of the event as stated in the article, else null
 - where: place as stated, else null
 - action_type: one of """ + ", ".join(ACTION_TYPES) + """
-- quote: an exact sentence copied word for word from the article that supports the event
+- quote: one sentence copied word for word from the article that supports the event. Never combine or reword sentences.
 Return JSON only."""
 
 # Sample spread across days, deterministic (md5 order instead of random).
@@ -138,14 +141,32 @@ def gpu_share(client: httpx.Client, model: str) -> float | None:
     return None
 
 
+def quote_verified(quote: str | None, haystack: str) -> bool:
+    """True if every piece of the quote is in the (normalized) article text.
+
+    Pieces are split at ellipses and [editorial brackets], which publishers add inside quotes.
+    """
+    if not quote:
+        return False
+    pieces = [p.strip(" .,") for p in re.split(r"…|\.\.\.|\[[^\]]*\]", normalize(quote))]
+    pieces = [p for p in pieces if p]
+    return bool(pieces) and all(p in haystack for p in pieces)
+
+
 def check(raw: str, text: str) -> dict:
-    """JSON validity and verbatim-quote counts for one model output."""
+    """JSON validity and verified-quote counts for one model output.
+
+    Each event gets quote_verified. In the real extraction an unverified quote is dropped and the
+    event is kept but marked unverified (not used as merge evidence); here the quote is kept for review.
+    """
     try:
         events = json.loads(raw)["events"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return {"json_ok": False, "events": [], "quotes_found": 0, "quotes_total": 0}
     haystack = normalize(text)
-    found = sum(1 for e in events if e.get("quote") and normalize(e["quote"]) in haystack)
+    for e in events:
+        e["quote_verified"] = quote_verified(e.get("quote"), haystack)
+    found = sum(e["quote_verified"] for e in events)
     return {"json_ok": True, "events": events, "quotes_found": found, "quotes_total": len(events)}
 
 
@@ -208,7 +229,7 @@ def main() -> None:
                 log.info("  first call (with model load): %.1fs", secs_first)
 
     print(f"\nResults: {out_file}\n")
-    print(f"{'model':34} {'json ok':>8} {'quotes verbatim':>16} {'s/article':>10} {'on GPU':>7} {'errors':>7}")
+    print(f"{'model':34} {'json ok':>8} {'quotes verified':>16} {'s/article':>10} {'on GPU':>7} {'errors':>7}")
     for model, s in stats.items():
         avg = sum(s["seconds"]) / len(s["seconds"]) if s["seconds"] else 0
         quotes = f"{s['quotes_found']}/{s['quotes_total']}"

@@ -1,6 +1,6 @@
 # Smriti: Technical Notes
 
-How the system works today: how data comes in, how it is stored, how articles are grouped into issues, and how the timeline is built. For run commands and current status, see `PROGRESS.md`.
+How the system works today: how data comes in, how it is stored, how articles are grouped into issues, and how the timeline is built. For run commands and current status, see [`PROGRESS.md`](../PROGRESS.md); for open problems, [`ISSUES.md`](ISSUES.md); for why, [`DECISIONS.md`](DECISIONS.md).
 
 _Last updated: 2026-10-10. Covers Step 1, Step 2 and the read-only web app._
 
@@ -206,7 +206,7 @@ A minimal hash router: `#/` shows the issue list, and `#/issues/42` shows one is
 ## 8. Configuration and environment
 
 - **`.env`:** `DATABASE_URL=postgresql://smriti:<password>@localhost:5433/smriti`. It is gitignored; the template is `.env.example`. No API keys are needed yet, because RSS and GDELT require none.
-- **Python dependencies** (`requirements.txt`, pinned): `httpx`, `feedparser`, `psycopg[binary]`, `python-dotenv`, `fastembed`, `numpy`, `pgvector`, `fastapi`, `uvicorn`. Installed in `.venv/`.
+- **Python dependencies** (`requirements.txt`, pinned): `httpx`, `feedparser`, `psycopg[binary]`, `python-dotenv`, `fastembed`, `numpy`, `pgvector`, `fastapi`, `uvicorn`, `trafilatura` (full text for the LLM test, in memory only). Installed in `.venv/`.
 - **Frontend dependencies:** `svelte` 5.57, `vite` 6.4, `@sveltejs/vite-plugin-svelte` 5.1.
 - **Postgres quirks:** this cluster is on 5433; the PG15 cluster on 5432 belongs to SonarQube. Create databases from `template0` (glibc collation mismatch). The `vector` extension was created once as superuser.
 - **Logs:** `logs/fetch.log`, `logs/api.log`, `logs/frontend.log`.
@@ -215,8 +215,7 @@ A minimal hash router: `#/` shows the issue list, and `#/issues/42` shows one is
 
 ## 9. Not built yet (planned)
 
-- **Event-level → issue-level merging:** the open problem from Step 2.
-- **Step 3 (Understand, LLM):** extract structured events from each article: who, what, when, action type, exact quote, and source URL.
+- **Event-level → issue-level merging:** the open problem from Step 2 (I-001; design in D-005 to D-015).
+- **Step 3 (Understand, LLM):** extract structured events from each article: who, what, when, action type, exact quote, and source URL. Being tested with `app/llm_test.py` (D-016 to D-020).
 - **Step 4 (Remember, graph in Postgres):** Issue → Events → People / Organizations / Places, with every event linked to its source articles. Store attributed facts, not conclusions.
 - **Scheduling:** fetch, embed and group are run by hand for now.
-- **Remote backup:** the git repo is local only; no GitHub remote yet.

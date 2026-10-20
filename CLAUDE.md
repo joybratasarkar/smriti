@@ -30,6 +30,8 @@ Accuracy rules to keep in mind from the start: every event must be traceable to 
 
 Current state, how to run things, and the next step live in `PROGRESS.md` (imported below). Update it at the end of every step or session.
 
+Problems live in `docs/ISSUES.md` and decisions in `docs/DECISIONS.md` (diagrams in `docs/WORKFLOW.md`). When you find or fix a problem, update `docs/ISSUES.md` in the same commit as the code. Record each decision the user makes in `docs/DECISIONS.md`. `/handoff` checks all of them at session end; `/status` reads them back.
+
 @PROGRESS.md
 
 ## STEP 1: Fetch and store news
