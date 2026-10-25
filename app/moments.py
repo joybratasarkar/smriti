@@ -152,33 +152,38 @@ def story_moments(conn, issue_id: int, names: dict[str, str]) -> dict:
     return {"mode": "path" if len(articles) >= MIN_PATH else "list", "moments": moments}
 
 
+def label_moment(conn, client: httpx.Client, issue_id: int, group: list[dict]) -> str:
+    """Label one moment unless it already has a label: 'kept', 'written' or 'fallback' (failed the check)."""
+    k = key_of(group)
+    if conn.execute("SELECT 1 FROM moment_labels WHERE moment_key = %s", (k,)).fetchone():
+        return "kept"
+    titles = [h["title"] for h in headlines(group)[:LABEL_HEADLINES]]
+    out, _ = ollama.chat(client, ollama.MODEL, SYSTEM, "Headlines:\n" + "\n".join(f"- {t}" for t in titles), SCHEMA, 2048)
+    label = json.loads(out).get("label", "").strip().rstrip(".")
+    if not safe(label, titles):
+        return "fallback"
+    conn.execute("INSERT INTO moment_labels (moment_key, issue_id, label, model) VALUES (%s, %s, %s, %s) "
+                 "ON CONFLICT (moment_key) DO NOTHING", (k, issue_id, label, ollama.MODEL))
+    conn.commit()
+    return "written"
+
+
 def label_stories(conn, limit: int) -> None:
     names = outlet_names(conn)
     ids = [r[0] for r in conn.execute("SELECT id FROM issues WHERE article_count >= %s ORDER BY article_count DESC LIMIT %s",
                                       (MIN_PATH, limit)).fetchall()]
     log.info("Labelling the moments of %d stories with %s", len(ids), ollama.MODEL)
-    written = fallback = kept = 0
+    done = {"written": 0, "fallback": 0, "kept": 0}
     with httpx.Client(timeout=600) as client:
         for n, issue_id in enumerate(ids, 1):
             _, groups = compute(conn, issue_id, names)
             for g in groups:
-                k = key_of(g)
-                if conn.execute("SELECT 1 FROM moment_labels WHERE moment_key = %s", (k,)).fetchone():
-                    kept += 1
-                    continue
-                titles = [h["title"] for h in headlines(g)[:LABEL_HEADLINES]]
-                out, _ = ollama.chat(client, ollama.MODEL, SYSTEM, "Headlines:\n" + "\n".join(f"- {t}" for t in titles), SCHEMA, 2048)
-                label = json.loads(out).get("label", "").strip().rstrip(".")
-                if not safe(label, titles):
-                    fallback += 1
-                    continue
-                conn.execute("INSERT INTO moment_labels (moment_key, issue_id, label, model) VALUES (%s, %s, %s, %s) "
-                             "ON CONFLICT (moment_key) DO NOTHING", (k, issue_id, label, ollama.MODEL))
-                conn.commit()
-                written += 1
+                done[label_moment(conn, client, issue_id, g)] += 1
             if n % 20 == 0:
-                log.info("  %d / %d stories: %d labels written, %d failed the check, %d already there", n, len(ids), written, fallback, kept)
-    log.info("Done: %d labels written, %d failed the check (trimmed headline shown), %d already there", written, fallback, kept)
+                log.info("  %d / %d stories: %d labels written, %d failed the check, %d already there", n, len(ids),
+                         done["written"], done["fallback"], done["kept"])
+    log.info("Done: %d labels written, %d failed the check (trimmed headline shown), %d already there",
+             done["written"], done["fallback"], done["kept"])
 
 
 def main() -> None:

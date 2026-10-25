@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 
-from app import moments
+from app import front, moments
 from app.db import connect
 
 app = FastAPI(title="Smriti API")
@@ -44,6 +44,17 @@ def summary():
                    (SELECT max(published_at) FROM articles) AS newest,
                    (SELECT max(fetched_at) FROM articles) AS last_fetched
         """).fetchone()
+
+
+@app.get("/api/front")
+def front_page(
+    topic: str = Query("Top", pattern="^(Top|" + "|".join(front.TABS) + ")$"),
+    limit: int = Query(13, ge=0, le=50),     # limit=0: just the tabs and when news was checked, for the top bar
+    offset: int = Query(0, ge=0),
+):
+    with db() as conn:
+        register_vector(conn)
+        return front.front(conn, outlets(conn), topic, offset, limit)
 
 
 @app.get("/api/issues")

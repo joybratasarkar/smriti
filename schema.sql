@@ -123,3 +123,13 @@ CREATE TABLE IF NOT EXISTS moment_labels (
     model       TEXT NOT NULL,              -- the LLM that wrote it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- D-032: clean titles for the stories on the front page (app/front.py). Keyed like moment_labels, by the story's
+-- newest moment, so a title is rewritten only when the story gets a new newest dot. No foreign key to issues:
+-- `app.group --reset` truncates issues, and a title still fits the same articles after a regroup.
+CREATE TABLE IF NOT EXISTS story_titles (
+    moment_key  TEXT PRIMARY KEY,           -- md5 of the newest moment's sorted article ids
+    title       TEXT NOT NULL,              -- 5 to 9 words, checked against the story's main headlines
+    model       TEXT NOT NULL,              -- the LLM that wrote it
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -3,12 +3,16 @@
 
   const PAGE = 30
 
+  // "All stories" (D-032): every story, including the ones the front page leaves out; the top bar's search lands here.
+  let { initialQuery = '' } = $props()
+
   // When the news was last fetched: "quiet" is measured against it (I-021).
   let checked = $state(null)
   getJSON('/api/summary').then((s) => (checked = s.last_fetched)).catch(() => {})
 
   let sort = $state('recent')
-  let query = $state('')
+  // svelte-ignore state_referenced_locally
+  let query = $state(initialQuery)  // App remounts the list for each new search
   let showSingles = $state(false)
   let issues = $state([])
   let total = $state(0)
@@ -44,6 +48,8 @@
     timer = setTimeout(() => load(), 250)
   })
 </script>
+
+<h1 class="page-title">All stories</h1>
 
 <div class="toolbar">
   <input type="search" placeholder="Search headlines…" bind:value={query} />

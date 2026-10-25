@@ -23,6 +23,7 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 | I-017 | 64 GDELT articles have a blank title; 56 of them form one junk story | bug | P2 | in progress | yes | Fixed in code (D-031): skipped by `app.fetch` and `app.group`; the 22:00 regroup drops the junk story. The rows stay in `articles` |
 | I-018 | Different incidents of the same kind chain into one story (campus deaths: 158 articles) | quality | P2 | open | partly | Measure on the gold set first |
 | I-019 | The same article is stored twice under different URLs (903 extra) | bug | P2 | in progress | yes | Fixed in code (D-031): `app.fetch` skips same site + headline + snippet within a day, `app.group` leaves existing copies out; applied by the 22:00 regroup |
+| I-022 | AI titles can state a false fact the name-and-number check lets through ("Tiger Shroff shot in Juhu"; he was shot at and unhurt) | quality | P1 | open | partly | Hand-check the 54 titles in `story_titles`; decide on a stronger check (an LLM referee asking whether the headlines support the title) |
 
 ## Details (open)
 
@@ -81,6 +82,11 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 - **Evidence (2026-10-24):** 903 extra articles share an outlet, a headline and a day with another article. Examples: The Hindu's article71422790 under `/news/international/` and `/business/Industry/`; `/incoming/…` and `/news/cities/Delhi/…` with the same article number; an Economic Times `articleshow/133852722` under `et-front` and under `epaper`. In a story's timeline they show twice, and story sizes are inflated (story 7438 has 3 repeated headlines, 2955 has 4).
 - **Cause:** `app/fetch.py` dedupes by normalized URL only, and outlets publish one article under several section paths.
 - **Fix idea (needs the user's OK):** dedupe by the outlet's article number in the URL (`article\d+.ece`, `articleshow/\d+.cms`, `-\d+.html`), or by site + headline + day; remove the existing copies and regroup.
+
+### I-022 · AI titles can state a false fact
+- **Evidence (2026-10-25, `logs/front_titles.out`):** the lead story's title "Tiger Shroff shot in Juhu, others injured" passed the check, but the headlines say "escapes firing attempt", "shot at", "escapes unhurt"; the driver and a passerby were injured. Deleted from `story_titles` by hand, so the card shows the trimmed headline.
+- **Cause:** `moments.safe` only checks that names and numbers appear in the headlines, not what the words claim. Dot labels (D-030) use the same check.
+- **To check:** "France protests turn violent, 2400 arrested" (the central headline says 1,800), "Houthis attack Saudi targets, Egypt supports", "Netanyahu warns of hostile US, seeks India ties".
 
 ## Closed
 

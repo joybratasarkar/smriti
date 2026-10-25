@@ -11,11 +11,11 @@ _Last updated: 2026-10-24_
 **Tonight (2026-10-25, from 22:00, detached):** the 2026-10-24 start never happened: the laptop suspended and a plain `sleep` stops counting while suspended. Relaunched 2026-10-25 11:00 under `systemd-inhibit` (blocks sleep, idle and lid-close suspend), waiting on the wall clock; a reboot at 11:04 killed it before any step ran, relaunched again 11:06 (check with `systemd-inhibit --list | grep smriti`; a reboot kills it, relaunch with the same command). `logs/run_2026-10-24.sh` regroups all 60 days with the trust fixes (D-031: closest-member scoring and the merge pass for I-016, no blank titles I-017, no second copies I-019), then links, link names, AI labels for the 300 biggest stories, and the gold-set check of the stories (`logs/gold2.out`). `logs/run2.done` says how it ended (expected around 05:30 on 2026-10-26). Front-page round 1 answered (yes to all, 2026-10-25). The app shows half-built stories while it runs.
 
 **Next 3 actions:**
-1. When `logs/run2.done` says `exit 0`: compare `logs/gold2.out` with the stories' scores before the fix (precision 0.86, recall 0.67) and check the split examples (Nepal, CJP, Tiger Shroff, flydubai).
-2. Front page "Today's stories": design interview, then a prototype (UI/UX review, 2026-10-24).
-3. Clean AI story titles and a 2-line summary, checked against the headlines like the dot labels.
+1. When `logs/run2.done` says `exit 0`: run `python -m app.front --titles 60` (the regroup changes the stories, so the front page shows trimmed headlines until then), compare `logs/gold2.out` with the stories' scores before the fix (precision 0.86, recall 0.67) and check the split examples (Nepal, CJP, Tiger Shroff, flydubai).
+2. Front page "Today's stories" is in the app (D-032, D-033): `#/` shows it, `#/all` the old list. Hand-check the AI titles (I-022: one false title found and deleted), then build the twice-daily automatic fetch of D-032.
+3. A 2-line story summary, checked against the headlines like the titles and dot labels (titles are done, D-032).
 
-**Waiting on the user:** answers to the front-page design questions; feedback on the story page.
+**Waiting on the user:** feedback on the front page (http://localhost:5173) and on the story page; how strict the title check should be (I-022).
 
 **MVP (top priority, see `[MVP]` in DECISIONS):**
 - Story grouping as a connected, traversable graph (D-023).
@@ -48,6 +48,7 @@ From the project root with `source .venv/bin/activate`.
 | Group into stories | `python -m app.group` (`--reset`); cut-offs in `app/group.py` |
 | Story links | `python -m app.links`; `--types N` has the LLM name the N strongest |
 | Timeline labels (D-030) | `python -m app.moments --label N`: AI labels for the key moments of the N biggest stories (unlabelled moments show a trimmed headline) |
+| Front-page titles (D-032) | `python -m app.front --titles N`: AI titles (and newest-dot labels) for the N top front-page stories; run after grouping |
 | Teacher labels (G-4) | `python -m app.teach` (progress), `--sample 3000`, `--label` |
 | Fine-tune (G-5) | `python -m app.train` → `models/ce-same-story/` (needed by `app.group`) |
 | Review issues | `python -m app.issues` (`--top 30`, `--id 42`) |
@@ -57,7 +58,7 @@ From the project root with `source .venv/bin/activate`.
 | API | `uvicorn app.api:app --reload --port 8010` |
 | Frontend | `cd frontend && npm run dev` (port 5173, proxies `/api` to 8010) |
 
-Refresh data: fetch → embed → group → links, or `/refresh` (its skill still lists fetch → embed → group).
+Refresh data: fetch → embed → group → links → front titles, or `/refresh` (its skill still lists fetch → embed → group).
 
 Servers in the background (logs in `logs/`):
 ```
