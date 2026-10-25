@@ -1,7 +1,11 @@
 <script>
-  import { getJSON, formatDate, timeAgo, isQuiet } from './lib/format.js'
+  import { getJSON, formatDate, formatDay, isQuiet } from './lib/format.js'
 
   const PAGE = 30
+
+  // When the news was last fetched: "quiet" is measured against it (I-021).
+  let checked = $state(null)
+  getJSON('/api/summary').then((s) => (checked = s.last_fetched)).catch(() => {})
 
   let sort = $state('recent')
   let query = $state('')
@@ -64,11 +68,11 @@
         <div class="card-meta">
           <span class="pill">{issue.article_count} {issue.article_count === 1 ? 'article' : 'articles'}</span>
           <span>{issue.source_count} {issue.source_count === 1 ? 'source' : 'sources'}</span>
-          <span>{formatDate(issue.first_seen)}{#if formatDate(issue.first_seen) !== formatDate(issue.last_seen)} – {formatDate(issue.last_seen)}{/if}</span>
-          {#if isQuiet(issue.last_seen)}
-            <span class="status quiet">quiet · last report {timeAgo(issue.last_seen)}</span>
-          {:else}
-            <span class="status active">active · {timeAgo(issue.last_seen)}</span>
+          <span>{formatDate(issue.first_seen)}{#if formatDate(issue.first_seen) !== formatDate(issue.last_seen)}{' – '}{formatDate(issue.last_seen)}{/if}</span>
+          {#if checked && isQuiet(issue.last_seen, checked)}
+            <span class="status quiet">quiet since {formatDay(issue.last_seen)}</span>
+          {:else if checked}
+            <span class="status active">active · latest {formatDay(issue.last_seen)}</span>
           {/if}
         </div>
         <p class="sources">{issue.sources.join(' · ')}</p>

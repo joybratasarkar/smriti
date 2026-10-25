@@ -13,25 +13,23 @@ import argparse
 import json
 import logging
 import re
-import time
 from datetime import date
 from pathlib import Path
 
 import httpx
 import trafilatura
 
+from app import ollama
 from app.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 LOG_FILE = ROOT / "logs" / "llm_test.log"
 
-OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M"]  # qwen3.5:4b dropped: does not fit in 4 GB VRAM
+DEFAULT_MODELS = [ollama.MODEL]  # qwen3.5:4b dropped: does not fit in 4 GB VRAM
 USER_AGENT = "Mozilla/5.0 (compatible; smriti-news-archive/0.1)"
 MAX_TEXT_CHARS = 6000   # keeps prompt + output inside the context window on a 4 GB GPU
 NUM_CTX = 4096
 MAX_EVENTS = 5          # output length is the main cost (~38 tok/s); minor events are mostly noise
-NUM_GPU = 99            # force all layers onto the GPU; Ollama's own estimate leaves ~30% on CPU
 
 ACTION_TYPES = ["protest", "arrest_detention", "statement", "court", "policy_decision",
                 "police_action", "election", "violence", "announcement", "demand", "warning", "other"]
@@ -114,28 +112,9 @@ def normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
-def ask_model(client: httpx.Client, model: str, text: str) -> tuple[str, float]:
-    """Raw model output and seconds taken."""
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        "format": EVENT_SCHEMA,
-        "think": False,
-        "stream": False,
-        "options": {"temperature": 0, "num_ctx": NUM_CTX, "num_gpu": NUM_GPU},
-    }
-    start = time.monotonic()
-    resp = client.post(f"{OLLAMA_URL}/api/chat", json=body)
-    resp.raise_for_status()
-    return resp.json()["message"]["content"], time.monotonic() - start
-
-
 def gpu_share(client: httpx.Client, model: str) -> float | None:
     """Fraction of the loaded model in VRAM (1.0 = fully on GPU), from /api/ps."""
-    for m in client.get(f"{OLLAMA_URL}/api/ps").json().get("models", []):
+    for m in client.get(f"{ollama.OLLAMA_URL}/api/ps").json().get("models", []):
         if m["name"] == model and m.get("size"):
             return m.get("size_vram", 0) / m["size"]
     return None
@@ -194,7 +173,7 @@ def main() -> None:
     stats = {m: {"n": 0, "json_ok": 0, "quotes_found": 0, "quotes_total": 0, "seconds": [], "gpu": None, "errors": 0}
              for m in args.models}
 
-    with httpx.Client(timeout=600) as ollama, out_file.open("w") as out:
+    with httpx.Client(timeout=600) as client, out_file.open("w") as out:
         for model in args.models:
             log.info("model %s", model)
             secs_first = None
@@ -203,7 +182,7 @@ def main() -> None:
                 s = stats[model]
                 s["n"] += 1
                 try:
-                    raw, secs = ask_model(ollama, model, text)
+                    raw, secs = ollama.chat(client, model, SYSTEM_PROMPT, text, EVENT_SCHEMA, NUM_CTX)
                 except httpx.HTTPError as e:
                     log.error("%s article %d: %s", model, art_id, e)
                     s["errors"] += 1
@@ -213,7 +192,7 @@ def main() -> None:
                 else:
                     s["seconds"].append(secs)
                 if s["gpu"] is None:
-                    s["gpu"] = gpu_share(ollama, model)
+                    s["gpu"] = gpu_share(client, model)
                 result = check(raw, text)
                 s["json_ok"] += result["json_ok"]
                 s["quotes_found"] += result["quotes_found"]

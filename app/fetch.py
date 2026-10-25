@@ -2,10 +2,11 @@
 
 Run with:  python -m app.fetch            (RSS feeds, last 7 days)
            python -m app.fetch --days 3
-           python -m app.fetch --gdelt    (also backfill from GDELT; experimental, see below)
+           python -m app.fetch --gdelt --days 60   (also backfill from GDELT bulk files)
 
-GDELT is off by default: during testing (Oct 2026) it rate-limited us (HTTP 429)
-even with 90 s between requests, and accepted requests returned no articles.
+GDELT is opt-in because it is a large download: one GKG file (~4 MB) per 15 minutes,
+about 24 GB for 60 days. Only rows from the Indian outlets in GDELT_DOMAINS are kept.
+The GDELT search API is not used: it answers HTTP 429 even to the first request (Oct 2026).
 
 Safe to run repeatedly: articles are deduplicated by URL.
 """
@@ -14,9 +15,11 @@ import argparse
 import calendar
 import hashlib
 import html
+import io
 import logging
 import re
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -34,28 +37,31 @@ USER_AGENT = "Mozilla/5.0 (compatible; smriti-news-archive/0.1)"
 MAX_ATTEMPTS = 3
 SNIPPET_MAX_CHARS = 500
 
-GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_QUERY = "sourcecountry:IN"   # articles from Indian outlets, any language
-GDELT_WINDOW = timedelta(hours=1)  # one request per window
-GDELT_MAX_RECORDS = 250            # GDELT's hard cap per request
-GDELT_PAUSE_SECONDS = 60           # documented limit is 5 s, but in practice it throttles far harder
-
-# GDELT returns language names; map the common ones to ISO 639-1 codes.
-GDELT_LANGUAGES = {
-    "English": "en", "Hindi": "hi", "Bengali": "bn", "Tamil": "ta", "Telugu": "te",
-    "Marathi": "mr", "Gujarati": "gu", "Kannada": "kn", "Malayalam": "ml",
-    "Punjabi": "pa", "Urdu": "ur", "Oriya": "or", "Nepali": "ne",
+GDELT_FILE_URL = "https://data.gdeltproject.org/gdeltv2/{stamp}.gkg.csv.zip"
+GDELT_STEP = timedelta(minutes=15)  # GDELT publishes one GKG file every 15 minutes
+GDELT_LAG = timedelta(minutes=30)   # the newest file appears a few minutes after its timestamp
+# The Indian outlets we also read by RSS. GDELT's GKG files cover English-language news only.
+GDELT_DOMAINS = {
+    "thehindu.com", "indianexpress.com", "hindustantimes.com", "indiatoday.in", "livemint.com",
+    "news18.com", "timesofindia.indiatimes.com", "economictimes.indiatimes.com", "ndtv.com", "scroll.in",
 }
+# Columns of a GKG 2.1 row (tab-separated)
+GKG_DATE, GKG_URL, GKG_EXTRAS = 1, 4, 26
 
 TRACKING_PARAMS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "ref_src"}
 
+# Outlets publish one article under several section paths, so a URL can be new while the article isn't (I-019):
+# the same site, headline and snippet within a day is the same article.
 INSERT_SQL = """
     INSERT INTO articles
         (url, title, snippet, source_name, source_domain, language,
          published_at, content_hash, provider)
-    VALUES
-        (%(url)s, %(title)s, %(snippet)s, %(source_name)s, %(source_domain)s, %(language)s,
-         %(published_at)s, %(content_hash)s, %(provider)s)
+    SELECT %(url)s, %(title)s, %(snippet)s, %(source_name)s, %(source_domain)s, %(language)s,
+           %(published_at)s::timestamptz, %(content_hash)s, %(provider)s
+    WHERE NOT EXISTS (
+        SELECT 1 FROM articles d
+        WHERE d.source_domain = %(source_domain)s AND d.content_hash = %(content_hash)s
+          AND abs(extract(epoch FROM coalesce(d.published_at, d.fetched_at) - coalesce(%(published_at)s::timestamptz, now()))) < 86400)
     ON CONFLICT (url) DO NOTHING
 """
 
@@ -222,81 +228,77 @@ def fetch_rss(conn, client: httpx.Client, cutoff: datetime) -> dict:
 
 # ---------- GDELT ----------
 
-def gdelt_start(conn, cutoff: datetime) -> datetime:
-    """Resume from the newest GDELT article we have, but never go back further than the cutoff."""
-    row = conn.execute("SELECT max(published_at) FROM articles WHERE provider = 'gdelt'").fetchone()
-    newest = row[0]
-    return max(newest, cutoff) if newest else cutoff
+def gdelt_stamps(conn, cutoff: datetime, last: datetime) -> list[datetime]:
+    """15-minute file timestamps from the cutoff to `last` that we haven't read yet."""
+    stamp = cutoff.replace(minute=cutoff.minute - cutoff.minute % 15, second=0, microsecond=0)
+    done = {row[0] for row in conn.execute("SELECT stamp FROM gdelt_files WHERE stamp >= %s", (stamp,))}
+    stamps = []
+    while stamp <= last:
+        if stamp not in done:
+            stamps.append(stamp)
+        stamp += GDELT_STEP
+    return stamps
 
 
-def gdelt_request(client: httpx.Client, start: datetime, end: datetime) -> list[dict] | None:
-    params = {
-        "query": GDELT_QUERY,
-        "mode": "artlist",
-        "format": "json",
-        "sort": "datedesc",
-        "maxrecords": GDELT_MAX_RECORDS,
-        "startdatetime": start.strftime("%Y%m%d%H%M%S"),
-        "enddatetime": end.strftime("%Y%m%d%H%M%S"),
-    }
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        resp = get_with_retries(client, GDELT_URL, params)
-        if resp is None:
-            return None
-        # GDELT reports rate limiting as a plain-text message rather than an error code.
-        if resp.text.startswith("Please limit requests"):
-            log.warning("GDELT rate limit hit, waiting (attempt %d/%d)", attempt, MAX_ATTEMPTS)
-            time.sleep(GDELT_PAUSE_SECONDS * 2 * attempt)
+def gdelt_file(client: httpx.Client, stamp: datetime) -> list[dict] | None:
+    """Articles from our outlets in one GKG file. None if the file can't be fetched or read."""
+    url = GDELT_FILE_URL.format(stamp=stamp.strftime("%Y%m%d%H%M%S"))
+    resp = get_with_retries(client, url)
+    if resp is None:
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+            text = z.read(z.namelist()[0]).decode("utf-8", errors="replace")
+    except (zipfile.BadZipFile, IndexError) as e:
+        log.error("GDELT file %s could not be read: %s", url, e)
+        return None
+
+    articles = []
+    for line in text.splitlines():
+        row = line.split("\t")
+        if len(row) <= GKG_EXTRAS or domain_of(row[GKG_URL]) not in GDELT_DOMAINS:
             continue
-        if not resp.text.strip():
-            return []  # GDELT returns an empty body when nothing matches
-        try:
-            return resp.json().get("articles", [])
-        except ValueError:
-            log.error("GDELT returned invalid JSON for %s - %s: %r", start, end, resp.text[:200])
-            return None
-    return None
+        title = re.search(r"<PAGE_TITLE>(.*?)</PAGE_TITLE>", row[GKG_EXTRAS])
+        if not title or not clean_text(title.group(1)):  # an empty tag gave 64 blank titles (I-017)
+            continue
+        articles.append(make_article(
+            url=row[GKG_URL],
+            title=title.group(1),
+            snippet=None,
+            source_name=domain_of(row[GKG_URL]),
+            language="en",
+            published_at=datetime.strptime(row[GKG_DATE], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc),
+            provider="gdelt",
+        ))
+    return articles
 
 
 def fetch_gdelt(conn, client: httpx.Client, cutoff: datetime) -> dict:
-    stats = {"windows": 0, "windows_failed": 0, "windows_capped": 0, "seen": 0, "inserted": 0}
-    now = datetime.now(timezone.utc)
-    start = gdelt_start(conn, cutoff)
-    total_windows = max(1, int((now - start) / GDELT_WINDOW) + 1)
-    log.info("GDELT: fetching %s to %s in %d windows (about %d min)",
-             start.strftime("%Y-%m-%d %H:%M"), now.strftime("%Y-%m-%d %H:%M"),
-             total_windows, total_windows * GDELT_PAUSE_SECONDS // 60)
+    stats = {"files": 0, "files_failed": 0, "seen": 0, "inserted": 0}
+    stamps = gdelt_stamps(conn, cutoff, datetime.now(timezone.utc) - GDELT_LAG)
+    if not stamps:
+        log.info("GDELT: nothing new to read")
+        return stats
+    log.info("GDELT: %d files of ~4 MB from %s to %s", len(stamps),
+             stamps[0].strftime("%Y-%m-%d %H:%M"), stamps[-1].strftime("%Y-%m-%d %H:%M"))
 
-    while start < now:
-        end = min(start + GDELT_WINDOW, now)
-        stats["windows"] += 1
-        items = gdelt_request(client, start, end)
-        if items is None:
-            stats["windows_failed"] += 1
+    day = {"seen": 0, "inserted": 0, "failed": 0}
+    for i, stamp in enumerate(stamps):
+        articles = gdelt_file(client, stamp)
+        stats["files"] += 1
+        if articles is None:
+            stats["files_failed"] += 1  # not recorded in gdelt_files, so the next run retries it
+            day["failed"] += 1
         else:
-            if len(items) >= GDELT_MAX_RECORDS:
-                stats["windows_capped"] += 1
-            articles = [
-                make_article(
-                    url=item["url"],
-                    title=item.get("title") or "",
-                    snippet=None,
-                    source_name=item.get("domain") or domain_of(item["url"]),
-                    language=GDELT_LANGUAGES.get(item.get("language"), (item.get("language") or "").lower() or None),
-                    published_at=datetime.strptime(item["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc),
-                    provider="gdelt",
-                )
-                for item in items
-                if item.get("url") and item.get("title") and item.get("seendate")
-            ]
-            inserted = save(conn, articles)
-            stats["seen"] += len(articles)
-            stats["inserted"] += inserted
-            log.info("GDELT %s  %3d articles, %3d new%s", start.strftime("%Y-%m-%d %H:%M"),
-                     len(articles), inserted, "  (hit 250 cap)" if len(items) >= GDELT_MAX_RECORDS else "")
-        start = end
-        if start < now:
-            time.sleep(GDELT_PAUSE_SECONDS)
+            conn.execute("INSERT INTO gdelt_files (stamp, articles) VALUES (%s, %s)", (stamp, len(articles)))
+            inserted = save(conn, articles)  # commits the gdelt_files row together with the articles
+            for d in (stats, day):
+                d["seen"] += len(articles)
+                d["inserted"] += inserted
+        if i == len(stamps) - 1 or stamps[i + 1].date() != stamp.date():  # one log line per day
+            log.info("GDELT %s  %4d articles, %4d new, %d files failed",
+                     stamp.strftime("%Y-%m-%d"), day["seen"], day["inserted"], day["failed"])
+            day = {"seen": 0, "inserted": 0, "failed": 0}
     return stats
 
 
@@ -315,7 +317,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch recent news into Postgres.")
     parser.add_argument("--days", type=int, default=7, help="how far back to fetch (default 7)")
     parser.add_argument("--skip-rss", action="store_true", help="don't fetch RSS feeds")
-    parser.add_argument("--gdelt", action="store_true", help="also backfill from GDELT (slow, experimental)")
+    parser.add_argument("--gdelt", action="store_true", help="also backfill from GDELT bulk files (~24 GB for 60 days)")
     args = parser.parse_args()
 
     setup_logging()
@@ -329,11 +331,7 @@ def main() -> None:
         if not args.skip_rss:
             log.info("RSS done: %s", fetch_rss(conn, client, cutoff))
         if args.gdelt:
-            stats = fetch_gdelt(conn, client, cutoff)
-            log.info("GDELT done: %s", stats)
-            if stats["windows_capped"]:
-                log.warning("%d GDELT windows hit the 250-article cap, so some articles in those hours were missed",
-                            stats["windows_capped"])
+            log.info("GDELT done: %s", fetch_gdelt(conn, client, cutoff))
     log.info("Fetch finished")
 
 

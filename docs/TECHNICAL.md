@@ -37,7 +37,8 @@ Each stage is a separate command. Each one picks up only new work and is safe to
 |---|---|
 | **NewsAPI** | The free tier is for development only (no production use), returns only 24h-delayed articles, and has limited Indian coverage. Rejected. |
 | **GNews** | The free tier is small (around 100 requests/day) and non-commercial. Rejected as the main source. |
-| **GDELT DOC 2.0 API** | Free, multilingual, and supports `sourcecountry:IN`. Implemented, but in testing (Oct 2026) it returned persistent HTTP 429s even with 60–90 s gaps between requests, and accepted requests came back empty. It is **opt-in only** (`--gdelt`). |
+| **GDELT DOC 2.0 API** | Free, multilingual, and supports `sourcecountry:IN`, but it answers HTTP 429 even to the first request (Oct 2026). Dropped. |
+| **GDELT GKG bulk files** | One file every 15 minutes, no rate limit, includes page titles and goes back years. About 4 MB per file (~24 GB for 60 days), English only, no snippet. Used for **backfill, opt-in** (`--gdelt`, D-026). |
 | **RSS feeds** | Free, reliable, published directly by the outlets, and include a snippet. **This is the default source.** |
 
 ### RSS feeds in use (`feeds.txt`, format `Name | URL`)
@@ -60,7 +61,7 @@ To add a source, add a line to `feeds.txt`. No code change is needed.
 - **Dates:** uses `published_parsed`, falling back to `updated_parsed`. Stored in UTC.
 - **Language:** taken from the entry or feed language tag and reduced to ISO 639-1 (`en-US` → `en`).
 - **Dedupe:** `INSERT … ON CONFLICT (url) DO NOTHING`, so re-running never creates duplicates. RSS runs before GDELT, so when both sources have the same URL, the RSS row (which has a snippet) wins.
-- **GDELT details (when enabled):** query `sourcecountry:IN`, `mode=artlist`, 1-hour windows, max 250 records per window (GDELT's cap; capped windows are logged as possibly incomplete), 60 s pause between windows. It resumes from the newest GDELT article already stored. Language names are mapped to ISO codes.
+- **GDELT details (when enabled):** downloads `https://data.gdeltproject.org/gdeltv2/<YYYYMMDDHHMMSS>.gkg.csv.zip` for every 15 minutes from the cutoff to 30 minutes ago, and keeps rows whose URL domain is in `GDELT_DOMAINS` (the Indian outlets we also read by RSS). Title from `<PAGE_TITLE>`, date = GDELT's first-seen time, language `en`, snippet NULL. Files already read are listed in `gdelt_files` and skipped, so reruns and longer `--days` only download what is missing; failed files are retried next run. One log line per day.
 - **Copyright:** **no full article text is stored**, only links and metadata.
 
 ---
@@ -87,13 +88,21 @@ The database is PostgreSQL 16 on port 5433, database `smriti`, with the `pgvecto
 
 Indexes: `published_at`, `content_hash`.
 
+### `gdelt_files`: GDELT files already read (Step 1 backfill)
+
+| Column | Type | Notes |
+|---|---|---|
+| `stamp` | TIMESTAMPTZ PK | The file's 15-minute timestamp (UTC) |
+| `articles` | INT NOT NULL | Rows kept from our outlets |
+| `fetched_at` | TIMESTAMPTZ NOT NULL | When it was read |
+
 ### `article_embeddings`: one vector per article (Step 2)
 
 | Column | Type | Notes |
 |---|---|---|
 | `article_id` | BIGINT PK → `articles(id)` ON DELETE CASCADE | |
 | `model` | TEXT NOT NULL | Model name, so we can re-embed if the model changes |
-| `embedding` | `vector(384)` NOT NULL | L2-normalized |
+| `embedding` | `vector(1024)` NOT NULL | bge-m3, L2-normalized. Was MiniLM `vector(384)` until D-024; `schema.sql` drops the old vectors and issues once |
 | `created_at` | TIMESTAMPTZ | |
 
 ### `issues`: a group of related articles (Step 2)
@@ -102,7 +111,7 @@ Indexes: `published_at`, `content_hash`.
 |---|---|---|
 | `id` | BIGSERIAL PK | Stable: never renumbered unless `--reset` |
 | `label` | TEXT NOT NULL | Headline of the member article closest to the centroid |
-| `centroid` | `vector(384)` NOT NULL | Mean of member embeddings |
+| `centroid` | `vector(1024)` NOT NULL | Mean of member embeddings |
 | `article_count` | INT | |
 | `first_seen` / `last_seen` | TIMESTAMPTZ | Earliest and latest member article date |
 | `created_at` | TIMESTAMPTZ | |
@@ -115,48 +124,101 @@ Index: `last_seen`.
 |---|---|---|
 | `article_id` | BIGINT PK → `articles(id)` | PK means each article belongs to exactly one issue |
 | `issue_id` | BIGINT → `issues(id)` ON DELETE CASCADE | Indexed |
-| `similarity` | REAL | Cosine similarity to the issue when assigned (1.0 if it founded the issue) |
+| `similarity` | REAL | Tower (bge-m3) cosine to the issue when assigned (1.0 if it founded the issue) |
+| `probability` | REAL | Cross-encoder P(same story) that made it join; NULL when the towers decided alone (new story or near-duplicate) |
+| `model` | TEXT | The cross-encoder that decided; NULL when none did |
 | `assigned_at` | TIMESTAMPTZ | |
+
+### `issue_links`: weighted edges between stories (G-6, `app/links.py`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `from_issue`, `to_issue` | BIGINT FK → `issues(id)` ON DELETE CASCADE | PK together; `from_issue` is the older story. Index on `to_issue` |
+| `weight` | REAL NOT NULL | Cross-encoder probability that the two stories are connected |
+| `link_type` | TEXT NOT NULL | `related` until the LLM names it: `same_story`, `follow_up`, `same_actor`, `same_topic`, `unrelated` |
+| `evidence` | TEXT | The LLM's one-line reason |
+| `model`, `typed_by` | TEXT | Cross-encoder that weighed it; LLM that named it |
+| `created_at` | TIMESTAMPTZ | |
+
+### `gold_pairs`: hand-labelled article pairs (G-2, `app/gold.py`)
+
+Used only to measure grouping models, never to train them.
+
+| Column | Type | Notes |
+|---|---|---|
+| `article_a`, `article_b` | BIGINT FK | `article_a < article_b`, unique pair |
+| `stratum` | TEXT | `nearest` (an article and its most similar article within 3 days, cosine 0.4–0.95), then bge-m3 cosine bands `high` (0.6–0.95), `middle` (0.4–0.6), `low` (< 0.4 but sharing a rare title word, in ≤ 0.5% of titles); articles ≤ 30 days apart. 50 of each in the gold set |
+| `cosine` | REAL | Tower (bge-m3) cosine when sampled |
+| `label` | TEXT | `same_story`, `follow_up`, `same_actor`, `same_topic`, `unrelated`, `unsure` (unsure is left out of scoring); NULL until labelled |
+| `labeled_at`, `created_at` | TIMESTAMPTZ | |
+
+The labelling tool hides the cosine and stratum, shows pairs in shuffled order, and asks for the first label that fits.
+
+### `train_pairs`: LLM-labelled article pairs (G-4, `app/teach.py`)
+
+Same columns as `gold_pairs` plus `labeled_by` (the LLM); labels without `unsure`. A pair is never in both tables.
+
+### `moment_labels`: short labels for the dots on a story's path (D-030, `app/moments.py`)
+
+`moment_key` (md5 of the moment's sorted article ids, primary key), `issue_id`, `label` (4 to 7 words), `model`, `created_at`. Moments themselves are not stored; a label stops applying when its moment's articles change.
 
 ### Entity relationships
 
 ```
 articles 1 ── 1 article_embeddings
 articles 1 ── 1 article_issues N ── 1 issues
+issues 1 ── N issue_links N ── 1 issues        (the story graph)
+issues 1 ── N moment_labels                    (labels for the timeline path)
 ```
 
 The planned Step 3/4 tables (events, people, organizations, places, and the edges between them) do not exist yet.
 
 ---
 
-## 4. Embeddings (`app/embed.py`)
+## 4. Embeddings, the "towers" (`app/embed.py`)
 
-- **Library:** `fastembed`, which runs ONNX on CPU. No GPU or PyTorch is needed.
-- **Model:** `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensions. It was chosen because it is **multilingual**: a Hindi and an English headline about the same event land close together, which matters for BBC Hindi and future Indian-language feeds. The model downloads on first run.
-- **Input text:** `"{title}. {snippet}"`, or just the title when there is no snippet. Full text is not available, by design.
+- **Model:** `BAAI/bge-m3` through `transformers` on the GPU in float16 (shared code in `app/models.py`), 1024 dimensions, CLS pooling. Multilingual, so a Hindi and an English headline about the same event land close together. Replaced MiniLM (fastembed, 384-dim) with D-024.
+- **Input text:** `"{title}. {snippet}"`, or just the title when there is no snippet (all GDELT rows). Full text is not available, by design.
 - **Normalization:** vectors are L2-normalized, so a dot product equals cosine similarity.
-- **Incremental:** only embeds articles with no embedding, or whose stored `model` differs from the current one. Changing `MODEL` triggers a full re-embed automatically.
-- **Batching:** 256 articles per batch, committed per batch.
+- **Incremental:** only embeds articles with no embedding, or whose stored `model` differs from the current one. Committed every 1,024 articles.
 
 ---
 
-## 5. Grouping into issues (`app/group.py`)
+## 5. Grouping into stories (`app/group.py`)
 
-The algorithm is **incremental single-pass clustering** (a leader/centroid approach), chosen over batch clustering (k-means, HDBSCAN) so that issue IDs stay stable as new news arrives.
+**Incremental single-pass clustering**, so issue IDs stay stable as news arrives, with a two-stage decision (D-024):
 
-1. Load all embedded articles that don't have an issue yet, sorted **oldest first** by `coalesce(published_at, fetched_at)`.
-2. For each article, look only at issues **active in the 14 days before it** (`last_seen ≥ article_time − 14 days`).
-3. Compute cosine similarity to each candidate issue's centroid.
-4. If the best similarity is **≥ 0.70**, join that issue: update the centroid as a running mean, increment the count, and extend `first_seen` and `last_seen`.
-5. Otherwise, **start a new issue** with this article as the seed.
-6. Save the results. Each changed issue is **relabelled** with the member headline nearest its centroid (pgvector `<=>` operator).
+1. Load unassigned embedded articles, **oldest first**, 2,000 at a time (progress is committed per chunk, so a crash loses little). Left out: blank titles (I-017) and second copies of an article, meaning the same site and `content_hash` within a day (I-019).
+2. **Towers:** cosine between the article vector and the centroid of every story active in the **30 days** before it, on the GPU. The 3 best with cosine **≥ 0.40** are candidates. No candidate: new story.
+3. **Near-duplicate:** best cosine **≥ 0.92** joins directly, without the cross-encoder.
+4. **Fine-tuned cross-encoder** (`models/ce-same-story`, from `app/train.py`): reads the article together with each candidate's 3 member headlines **closest to the article** (D-031; until 2026-10-24 its latest 3, which split events, I-016) and gives P(same story). Member vectors are kept in memory as float16. Best **≥ 0.5** joins (stored in `article_issues.probability`); otherwise a new story. About 0.1 s per article for 3 candidates on the GTX 1650. Below near-duplicate it decides every case, because look-alikes are often different stories (daily horoscopes, two El Niño articles; D-028).
+5. Each changed multi-article story is **relabelled** with the member headline nearest its centroid (pgvector `<=>`).
+6. **Merge pass** (D-031), after every run: stories with ≥ 2 articles whose centres have cosine **≥ 0.88** and are at most 30 days apart are compared on their **3 closest article pairs**. When the cross-encoder gives every pair ≥ 0.5, they merge into the oldest story (union-find over the passing pairs), which gets a new centroid (pgvector `avg`), counts, dates and label. The deleted stories' links and moment labels go with them. Dry run on the 2026-10-20 stories: 633 pairs checked, 354 passed, 298 stories merged (Nepal floods 10 → 1, US–Iran war 10 → 1).
 
-Properties:
-- An assigned article **never moves**, so issue URLs and IDs are stable.
-- `--threshold` tunes how strict grouping is. `--reset` truncates issues and regroups from scratch.
-- The `assign()` function is pure in-memory logic, so thresholds can be tested without touching the database.
+Full run (2026-10-20, `--reset`): 138,229 articles in 4 h 44 min, 8 a second. 72,591 stories; the cross-encoder decided 62,339 joins, and 3,299 near-duplicates joined directly.
 
-**Known limitation:** at 0.70 the groups are **event-level** ("trains cancelled for protest"), not issue-level ("the farmers' protest"). Result: 795 issues for 1,053 articles, of which only 98 have more than one article. Merging related events into one issue is the open problem.
+The cut-offs are provisional (D-027, D-028) until the gold set measures them (G-3). `app.group` stops with an error if the fine-tuned model is missing. `--reset` deletes all issues and links and regroups from scratch. The LLM referee for uncertain cases (D-024) is not in the bulk run: at ~1 s per call it would take hours.
+
+## 5a. Fine-tuning the cross-encoder (`app/teach.py`, `app/train.py`)
+
+Teacher-student (D-028):
+1. **Teacher** (`python -m app.teach --sample 3000 --label`): pairs are drawn like the gold set (40% nearest, 10% high, 40% middle, 10% low) into `train_pairs`, never a gold pair. The local LLM labels each with the gold-set rules (label only, ~1 s per pair).
+2. **Student** (`python -m app.train`): `bge-reranker-v2-m3`, target 1 if the teacher said `same_story`. Both orders of each pair. Top 4 transformer layers and the head are trained (the rest frozen), float32, batch 8, 128 tokens, AdamW 2e-5, 2 epochs; this fits next to the 2.3 GB model in 4 GB. Pairs with `id % 10 == 0` are held out; AUC and accuracy against the teacher are logged before and after. It is saved to `models/ce-same-story/` (gitignored, with `smriti.json` holding those numbers) only if the held-out AUC improved.
+
+## 5b. Story links, the graph edges (`app/links.py`)
+
+1. **Weigh** (`python -m app.links`): for each story with **≥ 2 articles**, the 5 other such stories with the closest centroid (cosine **≥ 0.5**) and at most **30 days** apart in time are candidates. The cross-encoder reads both stories' latest 3 headlines; its probability is the **weight**. Links with weight **≥ 0.2** are stored as `related`, older story first. A `related` link that drops below 0.2 on a rerun is deleted; named links are kept.
+2. **Name** (`python -m app.links --types N`): the LLM judge (`app/judge.py`, same label rules as the gold set) labels the N strongest unnamed links and gives a one-line reason, stored as `evidence`. Each story is described to it by its label, date range and article count.
+
+Full run (2026-10-20): 62,039 candidate pairs weighed in 73 min (14 a second), 10,390 kept. Naming the 500 strongest took 16 min (about 2 s each).
+
+Rerun both after `app.group`. `app.group --reset` deletes all links (new issue IDs).
+
+## 5c. Key moments, the dots on a story's path (`app/moments.py`, D-030)
+
+1. **Cut** (on every `GET /api/issues/{id}`, about 0.2 s for 224 articles): the story's articles become one moment per day (Indian time); the two neighbouring moments with the highest score merge until at most **7** remain. Score = cosine of their mean bge-m3 vectors − 0.02 per quiet day between them − 0.5 × their share of the story, + 0.15 when one holds under 4% of it. A gap-only rule failed: news comes almost every day. Stories with fewer than **4** articles get no path (`mode: "list"`).
+2. **Headlines:** each moment's distinct headlines, most central first; copies of one headline are folded into its `outlets`.
+3. **Label** (`python -m app.moments --label N`, the N biggest stories): the LLM writes 4 to 7 plain words from the moment's 6 most central headlines. Every capitalised word and number must appear in those headlines (commas in numbers ignored), or no label is stored and the page shows the trimmed central headline. First run, 300 stories: see PROGRESS.
 
 ---
 
@@ -166,11 +228,11 @@ The API is FastAPI, read-only, and returns JSON. Run it with `uvicorn app.api:ap
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/summary` | Header stats: article, issue and multi-article issue counts, source count, oldest and newest publish date, last fetch time |
+| `GET /api/summary` | Header stats: article, issue and multi-article issue counts, source count (news sites), oldest and newest publish date, last fetch time |
 | `GET /api/issues` | Issue list. Params: `sort` = `recent` (by `last_seen`) or `biggest` (by `article_count`); `min_size` (default 2, hides single-article issues); `q` (case-insensitive search over **member article titles**); `limit` (1–200, default 50); `offset`. Returns `{total, issues[]}`, where each issue has `id, label, article_count, first_seen, last_seen, source_count, sources[]` |
-| `GET /api/issues/{id}` | One issue plus all its articles (`id, title, url, snippet, source_name, language, published_at, similarity`), ordered oldest first. Returns 404 if the issue is missing |
+| `GET /api/issues/{id}` | One issue plus all its articles (`id, title, url, snippet, source_name, language, published_at, similarity, probability`), ordered oldest first; `links`: up to 20 connected stories (`id, label, article_count, first_seen, last_seen, link_type, weight, evidence`), strongest first, `unrelated` hidden; `mode` (`path` or `list`) and `moments` (`start, end, count, label, labelled, heads[{title, time, outlets[{name, url}]}], more`, section 5c); `checked`: the last fetch time. Returns 404 if the issue is missing |
 
-`published_at` in the detail endpoint falls back to `fetched_at` when the feed gave no date.
+`published_at` in the detail endpoint falls back to `fetched_at` when the feed gave no date. Source names are shown one per site (I-020): a GDELT row, whose `source_name` is its site, gets the feed's name for that site (`moments.outlet_names`, read once per server start).
 
 ---
 
@@ -186,19 +248,18 @@ A minimal hash router: `#/` shows the issue list, and `#/issues/42` shows one is
 
 - Search box (debounced 250 ms), **Latest** / **Most covered** toggle, and a "single-article stories" checkbox (switches `min_size` between 1 and 2).
 - Pages of 30 with a "Show more" button.
-- Each card shows the label, article count, source count, date range, sources, and an **active / quiet** badge.
+- Each card shows the label, article count, source count, date range, sources, and an **active / quiet** badge ("active · latest 20 Oct", "quiet since 9 Sept").
 
-### How the timeline is built (`IssueDetail.svelte` + `lib/format.js`)
+### The story page: a path of key moments (`IssueDetail.svelte`, `StoryPath.svelte`, D-030)
 
-1. Fetch `/api/issues/{id}`. The articles are already sorted oldest → newest by the API.
-2. **Group by calendar day in Indian time** (`Asia/Kolkata`). `dayKey()` formats each timestamp as `YYYY-MM-DD` in IST, so a story published at 23:30 UTC lands on the correct Indian date.
-3. Render an ordered list of days. Under each day, every article shows its **time (IST)**, a **headline linked to the original source** (opens in a new tab), the snippet, and the source name. Every entry is traceable to its source article.
-4. The `lang` attribute is set from the article language, so Hindi text renders and is read correctly.
+1. Fetch `/api/issues/{id}`; the API has already cut the story into moments (section 5c).
+2. **The path** (`StoryPath.svelte`): one dot per moment, sized by its reports, with its date range, label and report count, on a road drawn through the dot centres after layout (an SVG behind the HTML, redrawn by a `ResizeObserver`). Left to right with a wave when the box is 640 px or wider, winding downward when narrower. The last stop is **NOW** (the latest report, pulsing unless reduced motion is set). Linked stories (the 6 strongest) are purple side dots under the moment closest to their first report, named in plain words ("same event", "similar news") and opening that story's page. Arrow keys move between dots.
+3. **One dot open at a time**, under the path; the page opens on NOW ("Where it stands now": the latest report and when the news was last checked). A moment shows its 4 most central headlines (all on request), each linking to the article, with copies folded into "+N more copies".
+4. **All reports, day by day:** the full list, folded at the bottom (open by default for stories with no path), grouped by calendar day in Indian time (`dayKey()`), with time, linked headline, snippet and outlet. Hindi gets its `lang` attribute.
 
 ### Issue status
 
-- An issue is **quiet** if there has been no new article for **48 hours** (`QUIET_AFTER_HOURS` in `lib/format.js`). Quiet issues show *"No reports found since \<date, time\> (N days ago)"*.
-- Otherwise the issue is **active**: *"Still being reported · latest article N h ago"*.
+- Measured against the **last fetch**, not today (I-021): an issue is **quiet** when its last article is more than **48 hours** older than the last fetch (`QUIET_AFTER_HOURS` and `isQuiet()` in `lib/format.js`). It shows *"No new reports since \<date, time\> · news checked up to \<date\>"*; an active one shows *"Still being reported · latest report \<date, time\> · news checked up to \<date\>"*.
 - All dates and times are displayed in IST (`en-IN` locale).
 
 ---
@@ -213,9 +274,28 @@ A minimal hash router: `#/` shows the issue list, and `#/issues/42` shows one is
 
 ---
 
-## 9. Not built yet (planned)
+## 9. Grouping model comparison (G-3, `app/compare.py`)
 
-- **Event-level → issue-level merging:** the open problem from Step 2 (I-001; design in D-005 to D-015).
+Scores every labelled gold pair (`gold_pairs`, unsure left out) with each candidate, zero-shot, and prints AUC for `same_story` vs the rest, AUC for `same_story` + `follow_up` vs the rest, the best F1 for `same_story` with its threshold, and ms per pair. Per-pair scores go to `logs/compare_<date>.jsonl`.
+
+| Method | What it is | Model |
+|---|---|---|
+| `minilm` | Grouping signal before D-024 | MiniLM via fastembed, computed on the fly |
+| `tfidf` | Shared words weighted by rarity (IDF over all articles) | none |
+| `bge_m3` | Two-tower: cosine of CLS embeddings | `BAAI/bge-m3` (MIT) |
+| `nemotron_embed` | Two-tower: cosine of mean-pooled embeddings, `passage: ` prefix on both | `nvidia/llama-nemotron-embed-1b-v2` (OpenMDW-1.1) |
+| `bge_reranker` | Cross-encoder, text pair, sigmoid of the logit | `BAAI/bge-reranker-v2-m3` (Apache-2.0) |
+| `smriti_ce` | The same, fine-tuned on the LLM's labels | `models/ce-same-story` (`app/train.py`) |
+| `nemotron_rerank` | Cross-encoder, `question:{a} \n \n passage:{b}` template, sigmoid | `nvidia/llama-nemotron-rerank-1b-v2` (OpenMDW-1.1) |
+| `llm` | Qwen3-4B judge with the same label rules as the gold set (`MEANINGS` in `app/gold.py`); labels ranked 1 / 0.75 / 0.5 / 0.25 / 0 | via `app/ollama.py` |
+
+Cross-encoders score both orders (a, b) and (b, a) and average them, because a link has no direction. Transformers run one at a time on the GPU, BGE in float32 (float16 is ~5x slower on the GTX 1650) and the ~1B NVIDIA models in float16 (float32 doesn't fit in 4 GB); the Ollama model is unloaded first. Zero-shot AUC on the proxy pairs of D-027: cosine 0.893, bge_reranker 0.900, nemotron_rerank 0.857. On the gold set (2026-10-20, 199 pairs labelled by Claude, D-029), AUC for `same_story`: minilm 0.876, tfidf 0.888, bge_m3 0.918, nemotron_embed 0.915, bge_reranker 0.957, smriti_ce 0.966, nemotron_rerank 0.938, llm 0.959. Best F1: smriti_ce 0.863 (cut-off 0.485), llm 0.884, bge_m3 0.757. The NVIDIA models run their own code from the model repo (`trust_remote_code`).
+
+`app/ollama.py` holds the shared Ollama call (`chat`) with the I-007 retry, used by `app/llm_test.py` and `app/compare.py`.
+
+## 10. Not built yet (planned)
+
+- **Grouping model (MVP):** built and run (sections 5 to 5b). Still to do: measure it on the gold set and set the cut-offs (G-3), fix one event split into parallel stories (I-016), a multi-hop graph query (`WITH RECURSIVE` over `issue_links`), and the LLM referee for uncertain cases (D-024).
 - **Step 3 (Understand, LLM):** extract structured events from each article: who, what, when, action type, exact quote, and source URL. Being tested with `app/llm_test.py` (D-016 to D-020).
 - **Step 4 (Remember, graph in Postgres):** Issue → Events → People / Organizations / Places, with every event linked to its source articles. Store attributed facts, not conclusions.
 - **Scheduling:** fetch, embed and group are run by hand for now.

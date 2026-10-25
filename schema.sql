@@ -16,22 +16,38 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE INDEX IF NOT EXISTS articles_published_at_idx ON articles (published_at);
 CREATE INDEX IF NOT EXISTS articles_content_hash_idx ON articles (content_hash);
 
+CREATE TABLE IF NOT EXISTS gdelt_files (        -- GDELT GKG files already read, so reruns skip them
+    stamp       TIMESTAMPTZ PRIMARY KEY,        -- the file's 15-minute timestamp (UTC)
+    articles    INT NOT NULL,                   -- rows kept from our outlets
+    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Step 2: group articles into issues.
 -- The vector extension must be created once by a superuser:
 --   sudo -u postgres psql -p 5433 -d smriti -c "CREATE EXTENSION vector;"
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- D-024: the MiniLM vectors (384-dim) were replaced by bge-m3 (1024-dim). Vectors and the issues
+-- built from them are derived data, so they are dropped once; app.embed and app.group rebuild them.
+DO $$
+BEGIN
+    IF (SELECT atttypmod FROM pg_attribute
+        WHERE attrelid = to_regclass('article_embeddings') AND attname = 'embedding') = 384 THEN
+        DROP TABLE article_embeddings, article_issues, issues CASCADE;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS article_embeddings (
     article_id  BIGINT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
     model       TEXT NOT NULL,              -- so we can re-embed if the model changes
-    embedding   vector(384) NOT NULL,       -- L2-normalized
+    embedding   vector(1024) NOT NULL,      -- bge-m3, L2-normalized
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS issues (
     id             BIGSERIAL PRIMARY KEY,
     label          TEXT NOT NULL,           -- headline of the most central article, for now
-    centroid       vector(384) NOT NULL,    -- mean of member embeddings
+    centroid       vector(1024) NOT NULL,   -- mean of member embeddings
     article_count  INT NOT NULL DEFAULT 0,
     first_seen     TIMESTAMPTZ NOT NULL,    -- earliest member article's date
     last_seen      TIMESTAMPTZ NOT NULL,    -- latest member article's date
@@ -43,8 +59,67 @@ CREATE INDEX IF NOT EXISTS issues_last_seen_idx ON issues (last_seen);
 CREATE TABLE IF NOT EXISTS article_issues (     -- relation table: article -> issue
     article_id  BIGINT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
     issue_id    BIGINT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-    similarity  REAL NOT NULL,              -- cosine similarity to the issue when assigned
+    similarity  REAL NOT NULL,              -- tower (bge-m3) cosine to the issue when assigned
+    probability REAL,                       -- cross-encoder P(same story); NULL when the towers decided alone
+    model       TEXT,                       -- the cross-encoder that decided; NULL when none did
     assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS article_issues_issue_idx ON article_issues (issue_id);
+
+-- G-6: weighted links between stories (app/links.py). from_issue is the older story.
+CREATE TABLE IF NOT EXISTS issue_links (
+    from_issue  BIGINT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    to_issue    BIGINT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    weight      REAL NOT NULL,              -- cross-encoder probability that the two stories are connected
+    link_type   TEXT NOT NULL DEFAULT 'related'   -- 'related' until the LLM names the type
+                CHECK (link_type IN ('related', 'same_story', 'follow_up', 'same_actor', 'same_topic', 'unrelated')),
+    evidence    TEXT,                       -- the LLM's one-line reason
+    model       TEXT NOT NULL,              -- the cross-encoder that weighed it
+    typed_by    TEXT,                       -- the LLM that named the type
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (from_issue, to_issue),
+    CHECK (from_issue <> to_issue)
+);
+
+CREATE INDEX IF NOT EXISTS issue_links_to_idx ON issue_links (to_issue);
+
+-- G-2: article pairs labelled by hand; only used to measure grouping models (app/gold.py).
+CREATE TABLE IF NOT EXISTS gold_pairs (
+    id          BIGSERIAL PRIMARY KEY,
+    article_a   BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    article_b   BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    stratum     TEXT NOT NULL,              -- high / middle / low cosine band
+    cosine      REAL NOT NULL,              -- tower (bge-m3) cosine when sampled
+    label       TEXT CHECK (label IN ('same_story', 'follow_up', 'same_actor', 'same_topic', 'unrelated', 'unsure')),
+    labeled_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (article_a < article_b),
+    UNIQUE (article_a, article_b)
+);
+
+-- G-4: article pairs labelled by the LLM judge (the teacher), to fine-tune the cross-encoder (app/teach.py).
+-- Never the same pair as in gold_pairs.
+CREATE TABLE IF NOT EXISTS train_pairs (
+    id          BIGSERIAL PRIMARY KEY,
+    article_a   BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    article_b   BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    stratum     TEXT NOT NULL,              -- high / middle / low cosine band, as in gold_pairs
+    cosine      REAL NOT NULL,              -- tower (bge-m3) cosine when sampled
+    label       TEXT CHECK (label IN ('same_story', 'follow_up', 'same_actor', 'same_topic', 'unrelated')),
+    labeled_by  TEXT,                       -- the LLM that labelled it
+    labeled_at  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (article_a < article_b),
+    UNIQUE (article_a, article_b)
+);
+
+-- D-030: short labels for the key moments on a story's timeline path (app/moments.py). Moments are computed on
+-- request; a label is keyed by the moment's articles, so it stops applying when the moment changes.
+CREATE TABLE IF NOT EXISTS moment_labels (
+    moment_key  TEXT PRIMARY KEY,           -- md5 of the moment's sorted article ids
+    issue_id    BIGINT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    label       TEXT NOT NULL,              -- 4 to 7 words, checked against the moment's headlines
+    model       TEXT NOT NULL,              -- the LLM that wrote it
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

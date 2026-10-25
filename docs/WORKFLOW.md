@@ -20,8 +20,9 @@ flowchart LR
     G --> I[("issues + article_issues<br/>= the stories")]
     I --> LK["app.links<br/>weight + LLM type (section 6)"]
     LK --> L[("issue_links<br/>= the edges")]
-    I --> API["FastAPI<br/>app.api"] --> UI["Svelte UI<br/>timeline + connected stories"]
+    I --> API["FastAPI<br/>app.api + app.moments<br/>key moments (D-030)"] --> UI["Svelte UI<br/>story path: dots to 'now'<br/>+ connected stories"]
     L --> API
+    ML[("moment_labels<br/>AI labels, checked")] --> API
 
     A --> X["LLM extraction<br/>Qwen3-4B on GPU<br/>(I-002..I-005)"]
     X --> EV[("events + entities<br/>+ aliases")]
@@ -31,12 +32,12 @@ flowchart LR
     classDef testing fill:#fff3cd,stroke:#b8860b,color:#000
     classDef planned fill:#eeeeee,stroke:#888,color:#000
     classDef blocked fill:#f8d7da,stroke:#c62828,color:#000
-    class RSS,GD,F,A,E,V,T,I,API,UI done
-    class G,LK,L,X testing
+    class RSS,GD,F,A,E,V,T,G,I,LK,L,API,UI,ML done
+    class X testing
     class EV planned
 ```
 
-Running now (2026-10-20): the full regroup of all 60 days with the fine-tuned model, then the links (`logs/full_run.sh`).
+Run on all 60 days (2026-10-20, `logs/full_run.sh`): 72,591 stories and 10,390 links. Numbers in [`PROGRESS.md`](../PROGRESS.md); what is still wrong in section 2.
 
 ## 2. Issue board
 
@@ -47,13 +48,15 @@ flowchart LR
     subgraph OPEN["Open"]
         direction TB
         I016["★ I-016<br/>one event, parallel stories"]
+        I017["I-017<br/>blank titles, junk story"]
+        I018["I-018<br/>similar incidents chain"]
+        I019["I-019<br/>same article twice"]
         I005["I-005<br/>duplicate events"]
         I011["I-011<br/>old NVIDIA package"]
         I012["I-012<br/>git credential warning"]
     end
     subgraph PROG["In progress"]
         direction TB
-        I007["★ I-007<br/>Ollama OOM-killed"]
         I001["★ I-001<br/>event vs issue clusters"]
         I002["★ I-002<br/>who errors"]
         I003["I-003<br/>action_type"]
@@ -67,6 +70,9 @@ flowchart LR
     subgraph DONE["Closed"]
         direction TB
         I006["I-006 quotes"]
+        I007["I-007 Ollama OOM-killed"]
+        I020["I-020 outlet names"]
+        I021["I-021 stale 'no reports'"]
         I008["I-008 TECHNICAL.md"]
         I009["I-009 data stale"]
         I010["I-010 GDELT (won't fix)"]
@@ -78,9 +84,9 @@ flowchart LR
     classDef p1 fill:#f8d7da,stroke:#c62828,color:#000
     classDef normal fill:#fff,stroke:#888,color:#000
     classDef closed fill:#d4edda,stroke:#2e7d32,color:#000
-    class I016,I007,I001,I002 p1
-    class I005,I011,I012,I003,I004,I015,NONE normal
-    class I006,I008,I009,I010,I013,I014 closed
+    class I016,I001,I002 p1
+    class I017,I018,I019,I005,I011,I012,I003,I004,I015,NONE normal
+    class I006,I007,I008,I009,I010,I013,I014,I020,I021 closed
 ```
 
 ## 3. How an article joins a story (built, D-024 and D-028)
@@ -160,11 +166,11 @@ flowchart LR
     C -- "no" --> STOP["not saved, the run stops"]
     C -- "yes: AUC 0.908 → 0.967<br/>accuracy 0.86 → 0.931" --> M[("models/ce-same-story")]
     M --> G["app.group decides with it<br/>(section 3)"]
-    GOLD[("gold_pairs: 200 pairs<br/>labelled by hand")] -. "measures only, never trains" .-> CMP["app.compare: cosine, TF-IDF,<br/>zero-shot models, LLM, student"]
+    GOLD[("gold_pairs: 200 pairs<br/>labelled by Claude (D-029)")] -. "measures only, never trains" .-> CMP["app.compare: cosine, TF-IDF,<br/>zero-shot models, LLM, student"]
     M -.-> CMP
 ```
 
-The held-out check compares the student with the teacher's labels: it shows the student copies the teacher well, not that the teacher is right. The hand-labelled gold set is the real test (G-3). Retraining reuses the stored labels: the LLM only labels new pairs, and the student is trained again from the original model on all of them.
+The held-out check compares the student with the teacher's labels: it shows the student copies the teacher well, not that the teacher is right. The gold set is the real test (G-3). Claude labelled it, not the teacher, so the test stays independent of what the student learned (D-029). Retraining reuses the stored labels: the LLM only labels new pairs, and the student is trained again from the original model on all of them.
 
 The build order changed (D-027, D-028): the pipeline and the fine-tuning came first; the gold set now measures them.
 
@@ -174,18 +180,17 @@ flowchart LR
     G4 --> G5["G-5 Fine-tune<br/>cross-encoder, top 4 layers"]
     G5 --> G6["G-6 Graph tables<br/>model groups + links"]
     G6 --> G7["G-7 UI<br/>timeline + connected stories"]
-    G7 --> G2["G-2 Gold set<br/>200 pairs labelled by hand"]
+    G7 --> G2["G-2 Gold set<br/>200 pairs, labelled<br/>by Claude (D-029)"]
     G2 --> G3["G-3 Compare<br/>every model on the gold set"]
     G3 --> CHK{"student beats<br/>the baselines?"}
     CHK -- "no" --> G4
-    CHK -- "yes" --> CUT["Set the cut-offs<br/>on the gold set"]
+    CHK -- "yes: AUC 0.966,<br/>cosine 0.918" --> CUT["Set the cut-offs on the gold set<br/>student's best 0.485: keep 0.5"]
 
     classDef done fill:#d4edda,stroke:#2e7d32,color:#000
     classDef testing fill:#fff3cd,stroke:#b8860b,color:#000
     classDef planned fill:#eeeeee,stroke:#888,color:#000
-    class G1,G4,G5,G7 done
-    class G6 testing
-    class G2,G3,CHK,CUT planned
+    class G1,G4,G5,G6,G7,G2,G3,CHK done
+    class CUT testing
 ```
 
 ## 6. Links and the graph in Postgres (built, G-6)
@@ -202,6 +207,8 @@ flowchart TD
     L --> NAME["app.links --types N: the LLM names the N strongest<br/>same_story / follow_up / same_actor / same_topic / unrelated<br/>+ a one-line reason, stored as evidence"]
     NAME --> L
 ```
+
+Full run (2026-10-20): the 14,782 stories with 2 or more articles gave 62,039 candidate pairs, and 10,390 links were kept. The LLM named the 500 strongest: same_topic 330, unrelated 70, same_story 66, same_actor 34, follow_up 0. The strongest links are mostly look-alikes (market updates, horoscopes): the weight comes from the cross-encoder before fine-tuning (`BAAI/bge-reranker-v2-m3`), which rates look-alikes high.
 
 Walking the graph: a story's page (`GET /api/issues/{id}`) shows the stories linked to it in either direction, strongest first, up to 20, with links named `unrelated` hidden. Each one opens that story's page, with its own links, so you walk the graph one hop at a time. A multi-hop query (`WITH RECURSIVE` over `issue_links`) is planned.
 
@@ -246,7 +253,7 @@ erDiagram
     }
 ```
 
-## 7. The decisions behind this (D-023 to D-028)
+## 7. The decisions behind this (D-023 to D-029)
 
 All taken 2026-10-20. Full text in [`DECISIONS.md`](DECISIONS.md).
 
@@ -259,4 +266,5 @@ flowchart TD
     D25 --> D26["D-026 60 days of data from GDELT bulk files"]
     D26 --> D27["D-027 [MVP] Build the whole pipeline now<br/>with pretrained models, measure after"]
     D27 --> D28["D-028 [MVP] Fine-tune the cross-encoder now:<br/>the LLM teaches it with 3,000 labelled pairs"]
+    D28 --> D29["D-029 Claude labels the gold set,<br/>not the LLM that taught the student"]
 ```

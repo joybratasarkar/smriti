@@ -1,0 +1,222 @@
+"""Gold set for the grouping model (G-2): article pairs labelled by hand, used only to measure models.
+
+Run with:  python -m app.gold                 (progress: labels per stratum)
+           python -m app.gold --sample 200    (add 200 new pairs)
+           python -m app.gold --label         (label pairs in the terminal; stop any time, resume later)
+
+Pairs come in four equal strata, so the set holds both easy and hard cases:
+  nearest an article and its most similar article from within 3 days (cosine 0.4-0.95): the decision
+          grouping makes, and where most same-story pairs are
+  high    cosine 0.6-0.95: mostly the same topic, sometimes the same story (near-duplicates left out)
+  middle  cosine 0.4-0.6: the band where cosine can't decide
+  low     cosine < 0.4 but sharing a rare word ("CJP", "Baliyan"): same story worded differently, or coincidence
+The two articles are at most 30 days apart. Cosine is the bge-m3 embedding from app.embed
+(random same-day pairs: median 0.31, 95% below 0.44; CJP protest pairs: median 0.44).
+"""
+
+import argparse
+import random
+import re
+import textwrap
+from collections import defaultdict
+
+import numpy as np
+
+from app.db import connect_with_vectors
+
+LABELS = {"1": "same_story", "2": "follow_up", "3": "same_actor", "4": "same_topic", "5": "unrelated", "u": "unsure"}
+# Also the LLM judge's instructions (app.compare), so people and the model label by the same rules.
+# "One story" follows D-013.
+MEANINGS = {
+    "same_story": "the same ongoing issue: same core dispute or demand, same main people/orgs, at any stage "
+                  "(CJP demand, protest, detentions, trains cancelled, government response = one story)",
+    "follow_up": "a different issue that grew out of the other one, with its own new dispute "
+                 "(e.g. a separate court case over the police action at the protest)",
+    "same_actor": "same main person or organisation, unrelated issue",
+    "same_topic": "same kind of event or subject, different actors (two different protests)",
+    "unrelated": "none of the above",
+    "unsure": "can't tell from title and snippet (left out of scoring)",
+}
+DEFINITIONS = "Pick the FIRST label that fits:\n" + "\n".join(
+    textwrap.fill(MEANINGS[label], 100, initial_indent=f"  {key} {label:<11} ", subsequent_indent=" " * 16)
+    for key, label in LABELS.items()
+) + "\n  s skip for now, q quit, anything else shows this help"
+
+MAX_DAYS_APART = 30
+NEAR_DUPLICATE, HIGH, LOW = 0.95, 0.6, 0.4   # bge-m3 cosine band edges
+RARE_SHARE = 0.005                           # a rare word is in at most 0.5% of titles
+NEAREST_DAYS = 3
+MAX_TRIES = 2000                             # per pair, before giving up on a stratum
+
+LOAD_SQL = """
+    SELECT a.id, extract(epoch FROM a.published_at), a.title, e.embedding
+    FROM articles a JOIN article_embeddings e ON e.article_id = a.id
+    WHERE a.published_at IS NOT NULL
+"""
+# A pair is never in both the gold set and the training set (app/teach.py), so the gold set stays unseen.
+INSERT_SQL = """
+    INSERT INTO {table} (article_a, article_b, stratum, cosine)
+    SELECT %(a)s, %(b)s, %(stratum)s, %(cosine)s
+    WHERE NOT EXISTS (SELECT 1 FROM {other} WHERE article_a = %(a)s AND article_b = %(b)s)
+    ON CONFLICT DO NOTHING
+"""
+# Shuffled (md5) so strata are mixed while labelling.
+TO_LABEL_SQL = """
+    SELECT g.id, a.published_at, a.source_name, a.title, a.snippet, a.url,
+           b.published_at, b.source_name, b.title, b.snippet, b.url
+    FROM gold_pairs g JOIN articles a ON a.id = g.article_a JOIN articles b ON b.id = g.article_b
+    WHERE g.label IS NULL
+    ORDER BY md5(g.id::text)
+"""
+
+
+def band_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, lo: float, hi: float):
+    """Random article and a random partner with cosine in [lo, hi). (i, j, cosine) or None."""
+    for _ in range(MAX_TRIES):
+        i = rng.randrange(len(vectors))
+        sims = vectors @ vectors[i]
+        ok = (sims >= lo) & (sims < hi) & (np.abs(times - times[i]) <= MAX_DAYS_APART * 86400)
+        ok[i] = False
+        partners = np.flatnonzero(ok)
+        if len(partners):
+            j = int(rng.choice(partners))
+            return i, j, float(sims[j])
+    return None
+
+
+def nearest_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray):
+    """Random article and its most similar article within NEAREST_DAYS (not a near-duplicate). (i, j, cosine) or None."""
+    for _ in range(MAX_TRIES):
+        i = rng.randrange(len(vectors))
+        sims = vectors @ vectors[i]
+        sims[(np.abs(times - times[i]) > NEAREST_DAYS * 86400) | (sims >= NEAR_DUPLICATE)] = -1
+        sims[i] = -1
+        j = int(np.argmax(sims))
+        if sims[j] >= LOW:
+            return i, j, float(sims[j])
+    return None
+
+
+def rare_word_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, rare: dict[str, list[int]]):
+    """Two articles sharing a rare title word, with cosine below LOW. (i, j, cosine) or None."""
+    words = list(rare)
+    for _ in range(MAX_TRIES):
+        i, j = rng.sample(rare[rng.choice(words)], 2)
+        cosine = float(vectors[i] @ vectors[j])
+        if cosine < LOW and abs(times[i] - times[j]) <= MAX_DAYS_APART * 86400:
+            return i, j, cosine
+    return None
+
+
+def rare_words(titles: list[str]) -> dict[str, list[int]]:
+    """Word -> rows whose title has it, for words in 2 to RARE_SHARE of all titles."""
+    index = defaultdict(list)
+    for row, title in enumerate(titles):
+        for word in set(re.findall(r"[a-z]{3,}", title.lower())):
+            index[word].append(row)
+    max_count = max(2, int(RARE_SHARE * len(titles)))
+    return {w: rows for w, rows in index.items() if 2 <= len(rows) <= max_count}
+
+
+def sample(conn, sizes: dict[str, int], table: str = "gold_pairs", other: str = "train_pairs") -> None:
+    """Add pairs to `table` (gold_pairs or train_pairs): sizes[stratum] per stratum, none that are in `other`."""
+    rows = conn.execute(LOAD_SQL).fetchall()
+    if len(rows) < 2:
+        print("No embedded articles. Run python -m app.embed first.")
+        return
+    ids = [r[0] for r in rows]
+    times = np.array([float(r[1]) for r in rows])
+    vectors = np.vstack([r[3].to_numpy() for r in rows])  # L2-normalized, so dot product = cosine
+    rare = rare_words([r[2] for r in rows])
+    print(f"{len(rows)} embedded articles, {len(rare)} rare words")
+
+    rng = random.Random()
+    strata = {
+        "nearest": lambda: nearest_pair(rng, vectors, times),
+        "high": lambda: band_pair(rng, vectors, times, HIGH, NEAR_DUPLICATE),
+        "middle": lambda: band_pair(rng, vectors, times, LOW, HIGH),
+        "low": lambda: rare_word_pair(rng, vectors, times, rare),
+    }
+    insert = INSERT_SQL.format(table=table, other=other)
+    for stratum, size in sizes.items():
+        find, added = strata[stratum], 0
+        for _ in range(size * 5):  # some draws are pairs we already have
+            if added == size:
+                break
+            pair = find()
+            if pair is None:
+                break
+            i, j, cosine = pair
+            a, b = sorted((ids[i], ids[j]))
+            added += conn.execute(insert, {"a": a, "b": b, "stratum": stratum, "cosine": cosine}).rowcount
+        conn.commit()
+        print(f"{stratum:7} {added}/{size} pairs added")
+
+
+def show(name: str, published_at, source: str, title: str, snippet: str | None, url: str) -> None:
+    print(f"\n{name}  {published_at:%Y-%m-%d}  {source}")
+    print(textwrap.indent(textwrap.fill(title, 100), "   "))
+    if snippet:
+        print(textwrap.indent(textwrap.fill(textwrap.shorten(snippet, 300), 100), "   "))
+    print(f"   {url}")
+
+
+def label(conn) -> None:
+    pairs = conn.execute(TO_LABEL_SQL).fetchall()
+    print(DEFINITIONS)
+    for n, (pair_id, *articles) in enumerate(pairs, 1):
+        print(f"\n{'=' * 100}\nPair {n} of {len(pairs)} to label")
+        show("A", *articles[:5])
+        show("B", *articles[5:])
+        while True:
+            try:
+                key = input("\n1 same_story  2 follow_up  3 same_actor  4 same_topic  5 unrelated  u  s  q > ")
+            except EOFError:
+                return
+            key = key.strip().lower()
+            if key in LABELS:
+                conn.execute("UPDATE gold_pairs SET label = %s, labeled_at = now() WHERE id = %s",
+                             (LABELS[key], pair_id))
+                conn.commit()
+                break
+            if key == "s":
+                break
+            if key == "q":
+                return
+            print(DEFINITIONS)
+
+
+def progress(conn) -> None:
+    rows = conn.execute("""
+        SELECT stratum, coalesce(label, '(not yet)'), count(*) FROM gold_pairs GROUP BY 1, 2
+    """).fetchall()
+    if not rows:
+        print("No gold pairs yet. Run python -m app.gold --sample 200")
+        return
+    counts = defaultdict(dict)
+    for stratum, lab, count in rows:
+        counts[stratum][lab] = count
+    columns = list(LABELS.values()) + ["(not yet)"]
+    print(f"{'stratum':8}" + "".join(f"{c:>12}" for c in columns) + f"{'total':>8}")
+    for stratum in ("nearest", "high", "middle", "low"):
+        c = counts.get(stratum, {})
+        print(f"{stratum:8}" + "".join(f"{c.get(col, 0):>12}" for col in columns) + f"{sum(c.values()):>8}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--sample", type=int, metavar="N", help="add N new pairs")
+    parser.add_argument("--label", action="store_true", help="label pairs in the terminal")
+    args = parser.parse_args()
+
+    with connect_with_vectors() as conn:
+        if args.sample:
+            n = args.sample
+            sample(conn, {"nearest": n // 4, "high": n // 4, "middle": n - 3 * (n // 4), "low": n // 4})
+        if args.label:
+            label(conn)
+        progress(conn)
+
+
+if __name__ == "__main__":
+    main()
