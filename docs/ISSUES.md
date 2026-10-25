@@ -19,11 +19,12 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 | I-005 | Same event listed twice in one article | quality | P3 | open | unknown | Measure in the hand check |
 | I-011 | Leftover `nvidia-driver-535` package | chore | P3 | open | yes | `sudo apt remove nvidia-driver-535` after checking it isn't in use |
 | I-012 | Git warns `credential-manager-core` is not a git command | chore | P3 | open | yes | `git config --global --unset credential.helper` (push works without it) |
-| I-015 | Daily columns (horoscope, quote of the day) chain into giant "stories" | quality | P2 | in progress | yes | Much smaller after the full regroup (largest 19, was 202) but still one a day; decide whether to leave such columns out |
+| I-015 | Daily columns (horoscope, quote of the day) chain into giant "stories" | quality | P2 | in progress | yes | Much smaller after the full regroup (largest 19, was 202) but still one a day; decide whether to leave such columns out; routine reports are now a new story each day (D-035, the teacher's rules) |
 | I-017 | 64 GDELT articles have a blank title; 56 of them form one junk story | bug | P2 | in progress | yes | Fixed in code (D-031): skipped by `app.fetch` and `app.group`; the 22:00 regroup drops the junk story. The rows stay in `articles` |
-| I-018 | Different incidents of the same kind chain into one story (campus deaths: 158 articles) | quality | P2 | open | partly | Measure on the gold set first |
+| I-018 | Different incidents of the same kind chain into one story (campus deaths: 158 articles) | quality | P2 | open | partly | Measure on the gold set first; the teacher had the same fault (two different wife murders labelled same_story): hard-case rule added (D-035), measured after the 2026-10-25 regroup |
 | I-019 | The same article is stored twice under different URLs (903 extra) | bug | P2 | in progress | yes | Fixed in code (D-031): `app.fetch` skips same site + headline + snippet within a day, `app.group` leaves existing copies out; applied by the 22:00 regroup |
 | I-022 | AI titles can state a false fact the name-and-number check lets through ("Tiger Shroff shot in Juhu"; he was shot at and unhurt) | quality | P1 | open | partly | Hand-check the 54 titles in `story_titles`; decide on a stronger check (an LLM referee asking whether the headlines support the title) |
+| I-023 | One shared name carries a new event into an old story (Tiger Shroff shooting joined the FDA ad-notice story) | quality | P1 | in progress | yes | Fix running (D-034, D-035): teacher relabels 4000 pairs with hard-case rules, retrain, per-headline scoring, regroup from 2026-10-25 12:14; then check the Shroff / Mundhe stories, `logs/compare3.out` and `logs/gold3.out` |
 
 ## Details (open)
 
@@ -87,6 +88,12 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 - **Evidence (2026-10-25, `logs/front_titles.out`):** the lead story's title "Tiger Shroff shot in Juhu, others injured" passed the check, but the headlines say "escapes firing attempt", "shot at", "escapes unhurt"; the driver and a passerby were injured. Deleted from `story_titles` by hand, so the card shows the trimmed headline.
 - **Cause:** `moments.safe` only checks that names and numbers appear in the headlines, not what the words claim. Dot labels (D-030) use the same check.
 - **To check:** "France protests turn violent, 2400 arrested" (the central headline says 1,800), "Houthis attack Saudi targets, Egypt supports", "Netanyahu warns of hostile US, seeks India ties".
+
+### I-023 · One shared name carries a new event into an old story
+- **Evidence (2026-10-25, the user's screenshot of story 2975):** 118 reports, 23 Aug – 20 Oct: Maharashtra FDA chief Tukaram Mundhe's notices to Shah Rukh Khan, Ajay Devgn and Tiger Shroff over Vimal ads (26 Aug – 1 Oct), then the Tiger Shroff shooting in Juhu (18 Oct). Different stories by D-013; the only link is Tiger Shroff's name. A few unrelated Mundhe items (an eatery post, the oil ban) also joined at 0.52–0.55.
+- **Cause:** the student cross-encoder scores "Tiger Shroff Attack: Lawrence Bishnoi gang claims responsibility" against the FDA-notice headlines at 0.75–0.90; the teacher LLM labels the same pairs `same_topic`. The 3,000 training pairs (cosine strata) held few "same person, different event" pairs. Once the first shooting report is in, every later one finds it as the closest headline and joins at 0.97+. Reading the 3 closest headlines as one joined text (D-031) also inflates the score. Raising JOIN does not help: on the gold set 0.7 costs recall 0.81 → 0.69.
+- **Fix (D-034, D-035):** hard-case rules for the teacher (D-035); a `name` stratum of training pairs (sharing a rare capitalised title word, cosine 0.4–0.95), 1000 of them labelled by the teacher, student retrained; grouping scores each closest headline on its own and takes the mean. In-memory replay of the 404 Mundhe / Shroff / FDA articles with the old student: per-headline scoring alone moved 79 of 87 FDA articles out of the shooting story, not all (the student was still wrong).
+- **Scale:** 1,548 of 4,184 stories with 5+ reports had a gap over 14 days inside (2026-10-20 grouping); not all wrong.
 
 ## Closed
 

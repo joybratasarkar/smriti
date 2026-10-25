@@ -1,6 +1,6 @@
 # Smriti: diagrams
 
-_Last updated: 2026-10-20._ Where we stand in words: [`PROGRESS.md`](../PROGRESS.md). Problems: [`ISSUES.md`](ISSUES.md). Why things are the way they are: [`DECISIONS.md`](DECISIONS.md).
+_Last updated: 2026-10-25._ Where we stand in words: [`PROGRESS.md`](../PROGRESS.md). Problems: [`ISSUES.md`](ISSUES.md). Why things are the way they are: [`DECISIONS.md`](DECISIONS.md).
 
 How the story model works, in reading order: grouping (section 3), the transformer inside it (section 4), how it learned (section 5), links and the graph (section 6). The decisions behind it: section 7.
 
@@ -32,8 +32,8 @@ flowchart LR
     classDef testing fill:#fff3cd,stroke:#b8860b,color:#000
     classDef planned fill:#eeeeee,stroke:#888,color:#000
     classDef blocked fill:#f8d7da,stroke:#c62828,color:#000
-    class RSS,GD,F,A,E,V,T,G,I,LK,L,API,UI,ML done
-    class X testing
+    class RSS,GD,F,A,E,V,T,I,LK,L,API,UI,ML done
+    class G,X testing
     class EV planned
 ```
 
@@ -47,18 +47,20 @@ IDs link to [`ISSUES.md`](ISSUES.md). P1 issues are marked with ★.
 flowchart LR
     subgraph OPEN["Open"]
         direction TB
-        I016["★ I-016<br/>one event, parallel stories"]
-        I017["I-017<br/>blank titles, junk story"]
+        I022["★ I-022<br/>AI titles can be false"]
         I018["I-018<br/>similar incidents chain"]
-        I019["I-019<br/>same article twice"]
         I005["I-005<br/>duplicate events"]
         I011["I-011<br/>old NVIDIA package"]
         I012["I-012<br/>git credential warning"]
     end
     subgraph PROG["In progress"]
         direction TB
+        I023["★ I-023<br/>shared name joins stories"]
+        I016["★ I-016<br/>one event, parallel stories"]
         I001["★ I-001<br/>event vs issue clusters"]
         I002["★ I-002<br/>who errors"]
+        I017["I-017<br/>blank titles, junk story"]
+        I019["I-019<br/>same article twice"]
         I003["I-003<br/>action_type"]
         I004["I-004<br/>speculation as fact"]
         I015["I-015<br/>daily columns chain"]
@@ -84,7 +86,7 @@ flowchart LR
     classDef p1 fill:#f8d7da,stroke:#c62828,color:#000
     classDef normal fill:#fff,stroke:#888,color:#000
     classDef closed fill:#d4edda,stroke:#2e7d32,color:#000
-    class I016,I001,I002 p1
+    class I016,I001,I002,I022,I023 p1
     class I017,I018,I019,I005,I011,I012,I003,I004,I015,NONE normal
     class I006,I007,I008,I009,I010,I013,I014,I020,I021 closed
 ```
@@ -159,14 +161,14 @@ The LLM is too slow to judge every article, so it teaches the cross-encoder inst
 
 ```mermaid
 flowchart LR
-    P["app.teach samples 3,000 article pairs<br/>40% nearest: an article and its closest one within 3 days<br/>10% high cosine (0.6 – 0.95), 40% middle (0.4 – 0.6)<br/>10% low (below 0.4, sharing a rare title word)<br/>never a gold pair"] --> T["Teacher: Qwen3-4B (local LLM)<br/>labels each pair by the gold-set rules<br/>0.9 s per pair"]
-    T --> D[("train_pairs<br/>3,000 labels, 20% same_story")]
+    P["app.teach samples 3,000 article pairs<br/>40% nearest: an article and its closest one within 3 days<br/>10% high cosine (0.6 – 0.95), 40% middle (0.4 – 0.6)<br/>10% low (below 0.4, sharing a rare title word)<br/>+ 1,000 name pairs (shared rare name, I-023)<br/>never a gold pair"] --> T["Teacher: Qwen3-4B (local LLM)<br/>labels each pair by the gold-set rules<br/>+ hard-case rules (D-035), 0.9 s per pair"]
+    T --> D[("train_pairs<br/>4,000 labels (relabelled 2026-10-25)")]
     D --> S["Student: bge-reranker-v2-m3 (app.train)<br/>learns same story yes / no<br/>top 4 layers + head, 2 epochs"]
     S --> C{"better than before<br/>on the 10% held out?"}
     C -- "no" --> STOP["not saved, the run stops"]
     C -- "yes: AUC 0.908 → 0.967<br/>accuracy 0.86 → 0.931" --> M[("models/ce-same-story")]
     M --> G["app.group decides with it<br/>(section 3)"]
-    GOLD[("gold_pairs: 200 pairs<br/>labelled by Claude (D-029)")] -. "measures only, never trains" .-> CMP["app.compare: cosine, TF-IDF,<br/>zero-shot models, LLM, student"]
+    GOLD[("gold_pairs: 250 pairs<br/>labelled by Claude (D-029)")] -. "measures only, never trains" .-> CMP["app.compare: cosine, TF-IDF,<br/>zero-shot models, LLM, student"]
     M -.-> CMP
 ```
 

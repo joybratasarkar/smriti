@@ -2,6 +2,7 @@
 
 Run with:  python -m app.teach                 (progress: labels per stratum)
            python -m app.teach --sample 3000   (add pairs: 40% nearest, 10% high, 40% middle, 10% low cosine)
+           python -m app.teach --names 1000    (add pairs sharing a rare name: same person, often a different event, I-023)
            python -m app.teach --label         (the LLM labels the unlabelled pairs; stop any time, resume later)
 
 Pairs come from the same strata as the gold set (app/gold.py) but are never gold pairs, so the gold set
@@ -61,7 +62,7 @@ def progress(conn) -> None:
         counts[stratum][lab] = count
     columns = LABELS + ["(not yet)"]
     print(f"{'stratum':8}" + "".join(f"{c:>12}" for c in columns) + f"{'total':>8}")
-    for stratum in ("nearest", "high", "middle", "low"):
+    for stratum in ("nearest", "high", "middle", "low", "name"):
         c = counts.get(stratum, {})
         print(f"{stratum:8}" + "".join(f"{c.get(col, 0):>12}" for col in columns) + f"{sum(c.values()):>8}")
 
@@ -69,6 +70,7 @@ def progress(conn) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sample", type=int, metavar="N", help="add N new pairs")
+    parser.add_argument("--names", type=int, metavar="N", help="add N pairs sharing a rare capitalised word (I-023)")
     parser.add_argument("--label", action="store_true", help="label the unlabelled pairs with the LLM")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
@@ -79,6 +81,8 @@ def main() -> None:
             n = args.sample
             sample(conn, {"nearest": 4 * n // 10, "high": n // 10, "middle": n - 6 * n // 10, "low": n // 10},
                    "train_pairs", "gold_pairs")
+        if args.names:
+            sample(conn, {"name": args.names}, "train_pairs", "gold_pairs")
         if args.label:
             label(conn)
         progress(conn)

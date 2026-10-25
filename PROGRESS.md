@@ -1,6 +1,6 @@
 # Smriti: where we stand
 
-_Last updated: 2026-10-24_
+_Last updated: 2026-10-25_
 
 **Now:** MVP grouping pipeline built and run on all 60 days (D-024, D-027, D-028): bge-m3 towers, a cross-encoder fine-tuned on the LLM's labels (teacher-student), weighted story links, LLM link types, "Connected stories" in the UI. The overnight run (`logs/full_run.sh`, 2026-10-20 15:19 – 22:48, exit 0) did all of it: the LLM labelled 3,000 pairs; the fine-tuned cross-encoder agrees with it on 93.1% of held-out pairs (86% before; AUC 0.908 → 0.967); 138,229 articles became 72,591 stories (14,782 with 2 or more articles); 10,390 links, the 500 strongest named by the LLM; 200 gold pairs sampled. Per-step logs: `logs/*_full.out`, `logs/links_types.out`, `logs/gold_sample.out`. Biggest open problem: one event split into parallel stories (I-016).
 
@@ -8,10 +8,10 @@ _Last updated: 2026-10-24_
 
 **New story page (2026-10-24, D-030):** a story's timeline is now a path of up to 7 key-moment dots ending at "now", with short AI labels checked against the headlines, connected stories as side dots, and the full day-by-day list folded below. `app/moments.py`, `frontend/src/StoryPath.svelte`; prototype at https://claude.ai/artifact/JhpoMNAk8rpebmUryvRNto. Labels for the 300 biggest stories are being written (`logs/moments_label.out`).
 
-**Tonight (2026-10-25, from 22:00, detached):** the 2026-10-24 start never happened: the laptop suspended and a plain `sleep` stops counting while suspended. Relaunched 2026-10-25 11:00 under `systemd-inhibit` (blocks sleep, idle and lid-close suspend), waiting on the wall clock; a reboot at 11:04 killed it before any step ran, relaunched again 11:06 (check with `systemd-inhibit --list | grep smriti`; a reboot kills it, relaunch with the same command). `logs/run_2026-10-24.sh` regroups all 60 days with the trust fixes (D-031: closest-member scoring and the merge pass for I-016, no blank titles I-017, no second copies I-019), then links, link names, AI labels for the 300 biggest stories, and the gold-set check of the stories (`logs/gold2.out`). `logs/run2.done` says how it ended (expected around 05:30 on 2026-10-26). Front-page round 1 answered (yes to all, 2026-10-25). The app shows half-built stories while it runs.
+**Running now (2026-10-25 from 12:14, detached under `systemd-inhibit`):** the 22:00 run was cancelled for a better one. The user's screenshot showed the Tiger Shroff shooting inside Tukaram Mundhe's FDA ad-notice story (I-023): the student joins "same person, different event" pairs that the teacher LLM keeps apart. Fixes: grouping scores each closest headline on its own (D-034); the teacher got hard-case rules (D-035, 91.5% → 94.5% on the gold set) and relabels all 4000 training pairs, 1000 of them new shared-name pairs; then retrain, score the student on the gold set (`logs/compare3.out`), embed, `group --reset`, links, link names, labels, front titles, gold check (`logs/gold3.out`). News since 2026-10-20 already fetched (GDELT 6,494 new). `logs/run_2026-10-25.sh`, progress in `logs/run3.log`, `logs/run3.done` says how it ended (expected early on 2026-10-26: grouping ~6–9 h). Check it is alive with `systemd-inhibit --list | grep smriti`; a reboot kills it, rerun the script (it restarts from the relabelling; labels already written stay). The app shows half-built stories while it runs.
 
 **Next 3 actions:**
-1. When `logs/run2.done` says `exit 0`: run `python -m app.front --titles 60` (the regroup changes the stories, so the front page shows trimmed headlines until then), compare `logs/gold2.out` with the stories' scores before the fix (precision 0.86, recall 0.67) and check the split examples (Nepal, CJP, Tiger Shroff, flydubai).
+1. When `logs/run3.done` says `exit 0`: compare `logs/compare3.out` (student; was 92.5%, AUC 0.966) and `logs/gold3.out` (stories; were precision 0.86, recall 0.67) with before; check the Tiger Shroff shooting is its own story with the FDA notices as a connected story, and the split examples (Nepal, CJP, flydubai). Note the gold set grew to 250 pairs (50 shared-name, D-035).
 2. Front page "Today's stories" is in the app (D-032, D-033): `#/` shows it, `#/all` the old list. Hand-check the AI titles (I-022: one false title found and deleted), then build the twice-daily automatic fetch of D-032.
 3. A 2-line story summary, checked against the headlines like the titles and dot labels (titles are done, D-032).
 
@@ -27,12 +27,12 @@ Open problems: [`docs/ISSUES.md`](docs/ISSUES.md) · Decisions and why: [`docs/D
 
 | | |
 |---|---|
-| Articles | 138,229 (2,091 RSS + 136,138 GDELT), Aug 21 – Oct 20 2026 |
+| Articles | 149,641, Aug 21 – Oct 25 2026 (138,229 up to Oct 20; +6,494 GDELT and +6 RSS on Oct 25, plus earlier top-ups) |
 | Embeddings | 138,229 (all) |
 | Stories (issues) | 72,591; 14,782 with more than one article; largest 224 (a CJP protest story) |
 | Links | 10,390; the 500 strongest named: same_topic 330, unrelated 70, same_story 66, same_actor 34 |
 | Gold pairs | 200 (50 per stratum), all labelled: 196 by Claude (D-029), 4 by the user |
-| Last fetch | 2026-10-20 13:18 IST (RSS); GDELT backfill finished 15:39 IST |
+| Last fetch | 2026-10-25 11:53–11:59 IST (RSS + GDELT for 6 days; the newest GDELT file 404ed, not yet published) |
 | Last LLM test | 2026-10-20 rerun: 30/30 ran, JSON 30/30, quotes verified 128/146 (88%), 21.3 s/article, 100% GPU, 1 OOM kill retried |
 
 ## How to run
@@ -49,7 +49,7 @@ From the project root with `source .venv/bin/activate`.
 | Story links | `python -m app.links`; `--types N` has the LLM name the N strongest |
 | Timeline labels (D-030) | `python -m app.moments --label N`: AI labels for the key moments of the N biggest stories (unlabelled moments show a trimmed headline) |
 | Front-page titles (D-032) | `python -m app.front --titles N`: AI titles (and newest-dot labels) for the N top front-page stories; run after grouping |
-| Teacher labels (G-4) | `python -m app.teach` (progress), `--sample 3000`, `--label` |
+| Teacher labels (G-4) | `python -m app.teach` (progress), `--sample 3000`, `--names 1000` (shared-name pairs, I-023), `--label` |
 | Fine-tune (G-5) | `python -m app.train` → `models/ce-same-story/` (needed by `app.group`) |
 | Review issues | `python -m app.issues` (`--top 30`, `--id 42`) |
 | Gold set (G-2) | `python -m app.gold` (progress), `--sample 200`, `--label` |

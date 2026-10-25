@@ -8,10 +8,12 @@ Each unassigned article, oldest first:
      last WINDOW_DAYS days. The TOP_K best with cosine >= FLOOR are candidates; none means a new story.
   2. A near-duplicate (best cosine >= SURE) joins that story without asking the cross-encoder.
   3. In between, the fine-tuned cross-encoder (app/train.py) reads the article together with each candidate's
-     CLOSEST member headlines (the ones nearest the article, as in training: article against article) and gives
-     P(same story). The best candidate at or above JOIN gets the article; below it, a new story. Until
-     2026-10-24 it read the story's latest headlines instead, which split one event into parallel stories when
-     the matching headline had just dropped out of the window (I-016).
+     CLOSEST member headlines (the ones nearest the article), one pair at a time as in training, and gives
+     P(same story) as their mean. The best candidate at or above JOIN gets the article; below it, a new story.
+     Until 2026-10-24 it read the story's latest headlines instead, which split one event into parallel stories
+     when the matching headline had just dropped out of the window (I-016). Until 2026-10-25 it read the closest
+     headlines joined into one text, where one shared name let a new event into an old story (I-023: the Tiger
+     Shroff shooting joined the FDA ad-notice story).
 Articles with a blank title, and second copies of an article (same site, headline and snippet within a day,
 I-019), are left out. Progress is saved every CHUNK articles.
 Then split stories are merged: stories whose centres are closer than MERGE_COSINE and at most WINDOW_DAYS
@@ -64,8 +66,8 @@ class Story:
         row = vector.astype(np.float16)[None, :]
         self.members = row if self.members is None else np.vstack([self.members, row])
 
-    def text(self, vector: np.ndarray) -> str:
-        """The distinct member headlines closest to `vector`, closest first."""
+    def closest(self, vector: np.ndarray) -> list[str]:
+        """The CLOSEST distinct member headlines nearest `vector`, closest first."""
         order = np.argsort(-(self.members.astype(np.float32) @ vector))
         picked = []
         for k in order:
@@ -73,7 +75,7 @@ class Story:
                 picked.append(self.titles[k])
             if len(picked) == CLOSEST:
                 break
-        return " | ".join(picked)
+        return picked
 
 
 class Stories:
@@ -134,7 +136,14 @@ def assign(stories: Stories, articles, cross_encoder: models.CrossEncoder, count
             counts["joined_by_towers"] += 1
         elif found:
             text = models.article_text(title, snippet)
-            probs = cross_encoder.score([(text, stories.items[i].text(vector)) for i, _ in found])
+            batch, owner = [], []
+            for n, (i, _) in enumerate(found):
+                for headline in stories.items[i].closest(vector):
+                    batch.append((text, headline))
+                    owner.append(n)
+            # Mean over the closest headlines, each read on its own as in training: one shared name with a
+            # single member no longer carries a new event into an old story (I-023).
+            probs = np.bincount(owner, cross_encoder.score(batch), len(found)) / np.bincount(owner, None, len(found))
             best = int(np.argmax(probs))
             counts["cross_encoder_calls"] += 1
             if probs[best] >= JOIN:

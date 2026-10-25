@@ -10,6 +10,9 @@ Pairs come in four equal strata, so the set holds both easy and hard cases:
   high    cosine 0.6-0.95: mostly the same topic, sometimes the same story (near-duplicates left out)
   middle  cosine 0.4-0.6: the band where cosine can't decide
   low     cosine < 0.4 but sharing a rare word ("CJP", "Baliyan"): same story worded differently, or coincidence
+A fifth stratum is only used for training pairs (app/teach.py --names):
+  name    cosine 0.4-0.95 and sharing a rare capitalised title word ("Shroff", "Mundhe"): often the same person
+          in two different events, which the cross-encoder took for one story (I-023)
 The two articles are at most 30 days apart. Cosine is the bge-m3 embedding from app.embed
 (random same-day pairs: median 0.31, 95% below 0.44; CJP protest pairs: median 0.44).
 """
@@ -37,9 +40,27 @@ MEANINGS = {
     "unrelated": "none of the above",
     "unsure": "can't tell from title and snippet (left out of scoring)",
 }
+# Where the teacher LLM and the student went wrong on the gold set (I-023, D-035). The examples are made up,
+# not gold pairs, so the gold set stays an honest test.
+HARD_CASES = [
+    "Same kind of event but a different case (another victim, accused, court case, accident, raid or building), "
+    "even in the same place or the same court: same_topic, not same_story. Two dowry murders in one district "
+    "are two stories.",
+    "A new development in the same dispute (a reaction, reply, notice, march, arrest, probe or court step "
+    "between the same main parties) is same_story, not follow_up. follow_up needs a separate new dispute.",
+    "Same main person or organisation in a different matter: same_actor, not same_story. An actor's film release "
+    "and an attack on that actor are two stories; a company sued over prices and sued over a data leak are two.",
+    "An explainer, analysis, opinion piece, editorial, review or feature about one specific event or issue is "
+    "same_story with the news reports of it: 'Why the dam burst' and 'Dam bursts in Kerala, 12 dead' are one story.",
+    "Routine repeating reports (daily gold or fuel prices, weekly forex data, market wraps, horoscopes, quote of "
+    "the day) are a new story each day or edition: same_topic. One company's IPO from opening to allotment to "
+    "listing is one story.",
+]
 DEFINITIONS = "Pick the FIRST label that fits:\n" + "\n".join(
     textwrap.fill(MEANINGS[label], 100, initial_indent=f"  {key} {label:<11} ", subsequent_indent=" " * 16)
     for key, label in LABELS.items()
+) + "\nHard cases:\n" + "\n".join(
+    textwrap.fill(case, 100, initial_indent="  - ", subsequent_indent="    ") for case in HARD_CASES
 ) + "\n  s skip for now, q quit, anything else shows this help"
 
 MAX_DAYS_APART = 30
@@ -108,11 +129,24 @@ def rare_word_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, r
     return None
 
 
-def rare_words(titles: list[str]) -> dict[str, list[int]]:
-    """Word -> rows whose title has it, for words in 2 to RARE_SHARE of all titles."""
+def name_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, names: dict[str, list[int]]):
+    """Two articles sharing a rare capitalised word, with cosine in [LOW, NEAR_DUPLICATE). (i, j, cosine) or None."""
+    words = list(names)
+    for _ in range(MAX_TRIES):
+        i, j = rng.sample(names[rng.choice(words)], 2)
+        cosine = float(vectors[i] @ vectors[j])
+        if LOW <= cosine < NEAR_DUPLICATE and abs(times[i] - times[j]) <= MAX_DAYS_APART * 86400:
+            return i, j, cosine
+    return None
+
+
+def rare_words(titles: list[str], capitalised: bool = False) -> dict[str, list[int]]:
+    """Word -> rows whose title has it, for words in 2 to RARE_SHARE of all titles.
+    With `capitalised`, only words written with a capital letter (mostly names; Title Case headlines add a few others)."""
     index = defaultdict(list)
     for row, title in enumerate(titles):
-        for word in set(re.findall(r"[a-z]{3,}", title.lower())):
+        words = re.findall(r"[A-Z][a-z]{2,}", title) if capitalised else re.findall(r"[a-z]{3,}", title.lower())
+        for word in set(words):
             index[word].append(row)
     max_count = max(2, int(RARE_SHARE * len(titles)))
     return {w: rows for w, rows in index.items() if 2 <= len(rows) <= max_count}
@@ -128,6 +162,7 @@ def sample(conn, sizes: dict[str, int], table: str = "gold_pairs", other: str = 
     times = np.array([float(r[1]) for r in rows])
     vectors = np.vstack([r[3].to_numpy() for r in rows])  # L2-normalized, so dot product = cosine
     rare = rare_words([r[2] for r in rows])
+    names = rare_words([r[2] for r in rows], capitalised=True)
     print(f"{len(rows)} embedded articles, {len(rare)} rare words")
 
     rng = random.Random()
@@ -136,6 +171,7 @@ def sample(conn, sizes: dict[str, int], table: str = "gold_pairs", other: str = 
         "high": lambda: band_pair(rng, vectors, times, HIGH, NEAR_DUPLICATE),
         "middle": lambda: band_pair(rng, vectors, times, LOW, HIGH),
         "low": lambda: rare_word_pair(rng, vectors, times, rare),
+        "name": lambda: name_pair(rng, vectors, times, names),
     }
     insert = INSERT_SQL.format(table=table, other=other)
     for stratum, size in sizes.items():

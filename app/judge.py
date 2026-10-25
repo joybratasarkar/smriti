@@ -8,7 +8,7 @@ import json
 import httpx
 
 from app import ollama
-from app.gold import MEANINGS
+from app.gold import HARD_CASES, MEANINGS
 
 LABELS = [label for label in MEANINGS if label != "unsure"]
 RULES = (
@@ -16,6 +16,7 @@ RULES = (
     "or a story (its latest headlines).\n"
     "Pick the FIRST label that fits:\n"
     + "\n".join(f"- {label}: {MEANINGS[label]}" for label in LABELS)
+    + "\nHard cases:\n" + "\n".join(f"- {case}" for case in HARD_CASES)
 )
 SYSTEM = RULES + (
     "\nThen give the reason in one short sentence: what the two items share, or don't.\n"
