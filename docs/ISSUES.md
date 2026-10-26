@@ -11,20 +11,17 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 
 | ID | Title | Type | P | Status | Solvable? | Next action |
 |---|---|---|---|---|---|---|
-| I-001 | Grouping gives event-level clusters, not issues | question | P1 | in progress | yes | Gold set: the stories keep 67% of same-story pairs together (precision 0.86); the I-016 fix next, then measure again |
-| I-016 | One event split into parallel stories (Nepal floods: 8 stories) | quality | P1 | in progress | yes | Fix built (D-031); the regroup runs 2026-10-24 22:00, then measure on the gold set (stories' recall was 0.67) |
+| I-001 | Grouping gives event-level clusters, not issues | question | P1 | in progress | yes | 2026-10-25 regroup: CJP is now 3 big stories (was 165), the largest 1,820 articles over 2 months with some SIR / election-commission news mixed in; check story 8 for drift |
+| I-016 | One event split into parallel stories (Nepal floods: 8 stories) | quality | P1 | in progress | yes | 2026-10-25 regroup: Nepal, flydubai, *Toxic* now 1 story each; stories' recall 0.67 → 0.70 (0.75 counting links). Next: the 18 gold pairs still split, 15 with no link (`logs/gold3.out`) |
 | I-002 | LLM `who` field has wrong or invented entries | quality | P1 | in progress | partly | Hand-check the 2026-10-20 run |
 | I-003 | Wrong `action_type`; `arrest_detention` overused | quality | P2 | in progress | yes | Hand-check the 2026-10-20 run |
 | I-004 | Speculation ("could be arrested") stored as fact | quality | P2 | in progress | yes | Hand-check the 2026-10-20 run |
 | I-005 | Same event listed twice in one article | quality | P3 | open | unknown | Measure in the hand check |
 | I-011 | Leftover `nvidia-driver-535` package | chore | P3 | open | yes | `sudo apt remove nvidia-driver-535` after checking it isn't in use |
 | I-012 | Git warns `credential-manager-core` is not a git command | chore | P3 | open | yes | `git config --global --unset credential.helper` (push works without it) |
-| I-015 | Daily columns (horoscope, quote of the day) chain into giant "stories" | quality | P2 | in progress | yes | Much smaller after the full regroup (largest 19, was 202) but still one a day; decide whether to leave such columns out; routine reports are now a new story each day (D-035, the teacher's rules) |
-| I-017 | 64 GDELT articles have a blank title; 56 of them form one junk story | bug | P2 | in progress | yes | Fixed in code (D-031): skipped by `app.fetch` and `app.group`; the 22:00 regroup drops the junk story. The rows stay in `articles` |
-| I-018 | Different incidents of the same kind chain into one story (campus deaths: 158 articles) | quality | P2 | open | partly | Measure on the gold set first; the teacher had the same fault (two different wife murders labelled same_story): hard-case rule added (D-035), measured after the 2026-10-25 regroup |
-| I-019 | The same article is stored twice under different URLs (903 extra) | bug | P2 | in progress | yes | Fixed in code (D-031): `app.fetch` skips same site + headline + snippet within a day, `app.group` leaves existing copies out; applied by the 22:00 regroup |
-| I-022 | AI titles can state a false fact the name-and-number check lets through ("Tiger Shroff shot in Juhu"; he was shot at and unhurt) | quality | P1 | open | partly | Hand-check the 54 titles in `story_titles`; decide on a stronger check (an LLM referee asking whether the headlines support the title) |
-| I-023 | One shared name carries a new event into an old story (Tiger Shroff shooting joined the FDA ad-notice story) | quality | P1 | in progress | yes | Fix running (D-034, D-035): teacher relabels 4000 pairs with hard-case rules, retrain, per-headline scoring, regroup from 2026-10-25 12:14; then check the Shroff / Mundhe stories, `logs/compare3.out` and `logs/gold3.out` |
+| I-015 | Daily columns (horoscope, quote of the day) chain into giant "stories" | quality | P2 | in progress | yes | 2026-10-25 regroup: largest horoscope story still 19, quote of the day 6 (was 12); decide whether to leave such columns out of grouping |
+| I-018 | Different incidents of the same kind chain into one story (campus deaths: 158 articles) | quality | P2 | in progress | partly | 2026-10-25 regroup: IIT-Bombay (182, 176 about IIT-B) and IIT Delhi (60) are separate, a few other campus suicides still inside; the gold check finds 2 such joins (puja pandal checks, daily gold prices) |
+| I-022 | AI titles can state a false fact the name-and-number check lets through ("Tiger Shroff shot in Juhu"; he was shot at and unhurt) | quality | P1 | open | partly | Titles rewritten 2026-10-25 for the new stories (50 written, 10 failed the check): hand-check them; decide on a stronger check (an LLM referee asking whether the headlines support the title) |
 
 ## Details (open)
 
@@ -45,12 +42,14 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 - **Measured on the gold set (2026-10-20, Claude's labels, D-029):** of 48 same-story pairs, the app's stories keep 32 together; 16 are split, and 14 of those have no link between their stories either. The student alone, scoring each pair at 0.5, would keep 39 of 48 (recall 0.81 against 0.67), so most of the loss comes from how grouping uses it (3 latest headlines, no merging), not from the model.
 - **Not every `same_story` name is right:** "Tech layoffs 2026" is named `same_story` with four separate Oracle and Amazon layoff stories (centre cosine 0.68 to 0.72). Merging on the LLM's name alone would join different events.
 - **Fix proposed (2026-10-20, needs the user's OK):** (1) compare a new article with the story's 3 closest articles instead of its 3 latest headlines, the same kind of pair the student was trained on; (2) after grouping, a merge pass over story pairs with centre cosine ≥ 0.9: the student reads their closest articles, and the two merge when it says same story. Then regroup all 60 days (about 5 hours).
+- **2026-10-25 regroup (D-034, D-035; merge pass merged 197 stories):** Nepal floods 1 story of 20+ (695 articles, was 8), flydubai 1 (344, was 5), *Toxic* box office 1 (was 2), CJP 3 (788, 91 and 54 CJP headlines; was 165 stories). Gold check (`logs/gold3.out`, 245 pairs): precision 0.86 → 0.91, recall 0.67 → 0.70, 0.75 counting any link. 18 same-story pairs still split, 15 of them with no link: mostly two takes on one small item (two Fed officials on inflation, one Alia Bhatt outfit, one novel reviewed twice). The student alone keeps 0.82 of them, so grouping still loses some.
 
 ### I-001 · Event-level clusters, not issues
 - **Evidence:** at cosine 0.70, 87 separate "issues" in the DB are all the CJP / Jantar Mantar protest.
 - **Root cause:** similarity of title + snippet captures the event ("trains cancelled"), not the shared story behind it.
 - **Plan:** D-024: two-tower retrieval + fine-tuned cross-encoder gives link type and weight; LLM labels and referees. Chosen by a gold-set comparison.
 - **Full regroup with the fine-tuned model (2026-10-20):** 1,380 headlines mention CJP or Abhijeet Dipke; they are in 165 stories, the largest holding 176. Stories whose label mentions CJP or Jantar Mantar: 112 (the old count, 87, was on far fewer articles, with cosine 0.70). The stories are bigger (several with 100 or more articles) but still event-sized: the march, the detentions, the airport arrest, the court custody. The links connect only a few of them (I-016).
+- **2026-10-25 regroup:** the CJP protest is now one main story (issue 8: 1,820 articles, 21 Aug – 25 Oct, 788 headlines naming CJP) plus two smaller. A sample of the rest is mostly the protest (Jantar Mantar, detentions, metro closures, Abhijeet Dipke), but some SIR / chief-election-commissioner news has joined. Next: check whether that drift is one story by D-013 or should split off.
 
 ### I-002 · `who` errors
 - **Evidence (2026-10-20 hand check, 50 events, Oct 10 run):** invented acronym expansion "CJP (Chief Judicial Panel)"; non-entities "Facial Recognition System (FRS)", "Baliyan's brother"; "the government" turned into "Government of Delhi"; typo "Ashutosh Rank".
@@ -69,36 +68,26 @@ Everything broken, weak or undecided, and whether it can be fixed. IDs are perma
 - **Evidence:** Oct 10 run, article 121: events 1 and 2 are the same detention of Deepak Baliyan.
 - **Progress:** prompt rule (D-020); not measured yet.
 
-### I-017 · Blank titles form a junk story
-- **Evidence (2026-10-20 full regroup):** 64 GDELT articles have an empty title (timesofindia.indiatimes.com 48, thehindu.com 11, hindustantimes.com 5). 56 of them ended up in one story (issue 14345, empty label) although they are unrelated: a Kerala rapid-response team, a Gujarat court sentence, a Lucknow toll fraud. Its link to a squirrel-monkey story has weight 1.000, named `unrelated` by the LLM.
-- **Cause:** `gdelt_file` in `app/fetch.py` keeps a row when `<PAGE_TITLE>` is present but empty. RSS entries without a title are already skipped.
-- **Fix (needs the user's OK):** skip an empty title in `app/fetch.py`; remove the 64 articles (or take the title from the URL), then regroup.
-
 ### I-018 · Similar incidents chain into one story
 - **Evidence (2026-10-20 full regroup):** issue 941 (158 articles, Aug 21 – Oct 5) holds several separate deaths: an IISc student in Bengaluru, a nursing student in a Delhi hostel, IIT Delhi students, and the IIT-Bombay protests. By the D-013 definition these are different stories on the same topic.
 - **Likely cause:** the same as I-015. A new article is compared with the story's 3 latest headlines, so a story can drift from one incident to the next.
 - **Next:** measure how often this happens on the gold set; fixes would be a higher join cut-off or more training pairs of this kind.
-
-### I-019 · Same article stored twice
-- **Evidence (2026-10-24):** 903 extra articles share an outlet, a headline and a day with another article. Examples: The Hindu's article71422790 under `/news/international/` and `/business/Industry/`; `/incoming/…` and `/news/cities/Delhi/…` with the same article number; an Economic Times `articleshow/133852722` under `et-front` and under `epaper`. In a story's timeline they show twice, and story sizes are inflated (story 7438 has 3 repeated headlines, 2955 has 4).
-- **Cause:** `app/fetch.py` dedupes by normalized URL only, and outlets publish one article under several section paths.
-- **Fix idea (needs the user's OK):** dedupe by the outlet's article number in the URL (`article\d+.ece`, `articleshow/\d+.cms`, `-\d+.html`), or by site + headline + day; remove the existing copies and regroup.
+- **2026-10-25 regroup:** IIT-Bombay student death (issue 39443, 182 articles, 176 about IIT-B) and IIT Delhi (issue 2074, 60) are now separate stories; a few other campus suicides (a Kolkata BBA student, an NTF report) are still inside 39443. Gold check: 4 pairs wrongly together, 2 of this kind (two puja pandal safety drives; two days of MCX gold prices), plus a same-actor (Mani Ratnam films) and a same-topic (two trade opinion pieces).
 
 ### I-022 · AI titles can state a false fact
 - **Evidence (2026-10-25, `logs/front_titles.out`):** the lead story's title "Tiger Shroff shot in Juhu, others injured" passed the check, but the headlines say "escapes firing attempt", "shot at", "escapes unhurt"; the driver and a passerby were injured. Deleted from `story_titles` by hand, so the card shows the trimmed headline.
 - **Cause:** `moments.safe` only checks that names and numbers appear in the headlines, not what the words claim. Dot labels (D-030) use the same check.
 - **To check:** "France protests turn violent, 2400 arrested" (the central headline says 1,800), "Houthis attack Saudi targets, Egypt supports", "Netanyahu warns of hostile US, seeks India ties".
-
-### I-023 · One shared name carries a new event into an old story
-- **Evidence (2026-10-25, the user's screenshot of story 2975):** 118 reports, 23 Aug – 20 Oct: Maharashtra FDA chief Tukaram Mundhe's notices to Shah Rukh Khan, Ajay Devgn and Tiger Shroff over Vimal ads (26 Aug – 1 Oct), then the Tiger Shroff shooting in Juhu (18 Oct). Different stories by D-013; the only link is Tiger Shroff's name. A few unrelated Mundhe items (an eatery post, the oil ban) also joined at 0.52–0.55.
-- **Cause:** the student cross-encoder scores "Tiger Shroff Attack: Lawrence Bishnoi gang claims responsibility" against the FDA-notice headlines at 0.75–0.90; the teacher LLM labels the same pairs `same_topic`. The 3,000 training pairs (cosine strata) held few "same person, different event" pairs. Once the first shooting report is in, every later one finds it as the closest headline and joins at 0.97+. Reading the 3 closest headlines as one joined text (D-031) also inflates the score. Raising JOIN does not help: on the gold set 0.7 costs recall 0.81 → 0.69.
-- **Fix (D-034, D-035):** hard-case rules for the teacher (D-035); a `name` stratum of training pairs (sharing a rare capitalised title word, cosine 0.4–0.95), 1000 of them labelled by the teacher, student retrained; grouping scores each closest headline on its own and takes the mean. In-memory replay of the 404 Mundhe / Shroff / FDA articles with the old student: per-headline scoring alone moved 79 of 87 FDA articles out of the shooting story, not all (the student was still wrong).
-- **Scale:** 1,548 of 4,184 stories with 5+ reports had a gap over 14 days inside (2026-10-20 grouping); not all wrong.
+- **2026-10-25 run:** `app.front --titles 60` on the new stories: 50 titles written, 10 failed the check (headline shown), e.g. "Trump pledges $5,000 to all adults if GOP wins midterms", "Delhi Protests: 500+ Detained Ahead of CJP Rally". Dot labels for the 300 biggest stories: 1,882 written, 185 failed the check.
 
 ## Closed
 
 | ID | Title | Type | Closed | How |
 |---|---|---|---|---|
+| I-024 | Dot labelling crashed on an empty LLM answer | bug | 2026-10-25 | `app.moments` read the answer with `json.loads` unguarded; at 22:39 one empty reply ended the run before titles and the gold check. An unreadable answer now counts as a failed check (headline shown), like `app/judge.py`; resumed with `logs/run_2026-10-25b.sh`, labels already written kept |
+| I-023 | One shared name carries a new event into an old story (Tiger Shroff shooting in the FDA ad-notice story) | quality | 2026-10-26 | D-034 + D-035: teacher relabelled with hard-case rules, 1000 shared-name pairs, student retrained, per-headline scoring, full regroup. Shooting is its own story (314 articles, 0 FDA); student 93.5% on gold, same-actor pairs wrongly joined 2 of 21 |
+| I-019 | The same article is stored twice under different URLs (903 extra) | bug | 2026-10-26 | D-031 fix applied by the 2026-10-25 regroup: 1 repeated outlet + headline + day left in the stories (was 903) |
+| I-017 | 64 GDELT articles have a blank title; 56 of them form one junk story | bug | 2026-10-26 | D-031 fix applied by the 2026-10-25 regroup: no blank-title article is grouped, no blank-label story |
 | I-020 | One outlet shown under two names (21 names for 15 sites) | bug | 2026-10-24 | The API shows one name per site: a GDELT row gets the feed's name for its site (`moments.outlet_names`), and source counts use sites (header 21 → 15). The stored `source_name` is unchanged; BBC's three feeds keep their own names |
 | I-021 | Every story said "No reports found since …" when the data was stale | bug | 2026-10-24 | "Quiet" is measured against the last fetch, not today, and the status says when the news was checked: "No new reports since 9 Sept · news checked up to 20 Oct" (D-030) |
 | I-007 | Ollama killed by the out-of-memory killer | bug | 2026-10-20 | Ollama's prompt cache (8 GiB default) filled the 7.1 GB of RAM. Turned off (`LLAMA_ARG_CACHE_RAM=0`, systemd drop-in) plus a retry in code. The full run (2,960 teacher labels, 500 link names) had no OOM kill |

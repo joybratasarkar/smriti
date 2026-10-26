@@ -159,7 +159,10 @@ def label_moment(conn, client: httpx.Client, issue_id: int, group: list[dict]) -
         return "kept"
     titles = [h["title"] for h in headlines(group)[:LABEL_HEADLINES]]
     out, _ = ollama.chat(client, ollama.MODEL, SYSTEM, "Headlines:\n" + "\n".join(f"- {t}" for t in titles), SCHEMA, 2048)
-    label = json.loads(out).get("label", "").strip().rstrip(".")
+    try:
+        label = json.loads(out).get("label", "").strip().rstrip(".")
+    except (json.JSONDecodeError, AttributeError):  # an empty or broken answer: show the headline, as for a failed check
+        return "fallback"
     if not safe(label, titles):
         return "fallback"
     conn.execute("INSERT INTO moment_labels (moment_key, issue_id, label, model) VALUES (%s, %s, %s, %s) "

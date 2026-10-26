@@ -222,7 +222,7 @@ Rerun both after `app.group`. `app.group --reset` deletes all links (new issue I
 
 1. **Cut** (on every `GET /api/issues/{id}`, about 0.2 s for 224 articles): the story's articles become one moment per day (Indian time); the two neighbouring moments with the highest score merge until at most **7** remain. Score = cosine of their mean bge-m3 vectors − 0.02 per quiet day between them − 0.5 × their share of the story, + 0.15 when one holds under 4% of it. A gap-only rule failed: news comes almost every day. Stories with fewer than **4** articles get no path (`mode: "list"`).
 2. **Headlines:** each moment's distinct headlines, most central first; copies of one headline are folded into its `outlets`.
-3. **Label** (`python -m app.moments --label N`, the N biggest stories): the LLM writes 4 to 7 plain words from the moment's 6 most central headlines. Every capitalised word and number must appear in those headlines (commas in numbers ignored), or no label is stored and the page shows the trimmed central headline. First run, 300 stories: see PROGRESS.
+3. **Label** (`python -m app.moments --label N`, the N biggest stories): the LLM writes 4 to 7 plain words from the moment's 6 most central headlines. Every capitalised word and number must appear in those headlines (commas in numbers ignored), or no label is stored and the page shows the trimmed central headline; an empty or unreadable LLM answer is treated the same (I-024). A rerun keeps labels already stored. Last run (2026-10-25, 300 stories): 1,882 written, 185 failed the check.
 
 ## 5d. The front page, "Today's stories" (`app/front.py`, D-032)
 

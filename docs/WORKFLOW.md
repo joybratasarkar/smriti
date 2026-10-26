@@ -1,6 +1,6 @@
 # Smriti: diagrams
 
-_Last updated: 2026-10-25._ Where we stand in words: [`PROGRESS.md`](../PROGRESS.md). Problems: [`ISSUES.md`](ISSUES.md). Why things are the way they are: [`DECISIONS.md`](DECISIONS.md).
+_Last updated: 2026-10-26._ Where we stand in words: [`PROGRESS.md`](../PROGRESS.md). Problems: [`ISSUES.md`](ISSUES.md). Why things are the way they are: [`DECISIONS.md`](DECISIONS.md).
 
 How the story model works, in reading order: grouping (section 3), the transformer inside it (section 4), how it learned (section 5), links and the graph (section 6). The decisions behind it: section 7.
 
@@ -12,7 +12,7 @@ Green = built. Yellow = testing or running. Grey = designed, not built. Red = bl
 flowchart LR
     RSS["16 RSS feeds<br/>(15 outlets)"] --> F["app.fetch<br/>dedupe by URL"]
     GD["GDELT GKG bulk files<br/>60-day backfill (D-026)"] --> F
-    F --> A[("articles<br/>138,229: Aug 21 – Oct 20")]
+    F --> A[("articles<br/>149,641: Aug 21 – Oct 25")]
     A --> E["app.embed<br/>bge-m3, 1024-dim"]
     E --> V[("article_embeddings")]
     V --> G["app.group<br/>towers + fine-tuned<br/>cross-encoder (section 3)"]
@@ -37,7 +37,7 @@ flowchart LR
     class EV planned
 ```
 
-Run on all 60 days (2026-10-20, `logs/full_run.sh`): 72,591 stories and 10,390 links. Numbers in [`PROGRESS.md`](../PROGRESS.md); what is still wrong in section 2.
+Run on all 66 days (2026-10-25, `logs/run_2026-10-25.sh`): 83,636 stories (18,321 with 2+ articles) and 15,760 links. Numbers in [`PROGRESS.md`](../PROGRESS.md); what is still wrong in section 2.
 
 ## 2. Issue board
 
@@ -48,19 +48,16 @@ flowchart LR
     subgraph OPEN["Open"]
         direction TB
         I022["★ I-022<br/>AI titles can be false"]
-        I018["I-018<br/>similar incidents chain"]
         I005["I-005<br/>duplicate events"]
         I011["I-011<br/>old NVIDIA package"]
         I012["I-012<br/>git credential warning"]
     end
     subgraph PROG["In progress"]
         direction TB
-        I023["★ I-023<br/>shared name joins stories"]
         I016["★ I-016<br/>one event, parallel stories"]
         I001["★ I-001<br/>event vs issue clusters"]
         I002["★ I-002<br/>who errors"]
-        I017["I-017<br/>blank titles, junk story"]
-        I019["I-019<br/>same article twice"]
+        I018["I-018<br/>similar incidents chain"]
         I003["I-003<br/>action_type"]
         I004["I-004<br/>speculation as fact"]
         I015["I-015<br/>daily columns chain"]
@@ -71,6 +68,10 @@ flowchart LR
     end
     subgraph DONE["Closed"]
         direction TB
+        I023["I-023 shared name joins stories"]
+        I024["I-024 dot labels crash"]
+        I017["I-017 blank titles"]
+        I019["I-019 same article twice"]
         I006["I-006 quotes"]
         I007["I-007 Ollama OOM-killed"]
         I020["I-020 outlet names"]
@@ -86,9 +87,9 @@ flowchart LR
     classDef p1 fill:#f8d7da,stroke:#c62828,color:#000
     classDef normal fill:#fff,stroke:#888,color:#000
     classDef closed fill:#d4edda,stroke:#2e7d32,color:#000
-    class I016,I001,I002,I022,I023 p1
-    class I017,I018,I019,I005,I011,I012,I003,I004,I015,NONE normal
-    class I006,I007,I008,I009,I010,I013,I014,I020,I021 closed
+    class I016,I001,I002,I022 p1
+    class I018,I005,I011,I012,I003,I004,I015,NONE normal
+    class I006,I007,I008,I009,I010,I013,I014,I017,I019,I020,I021,I023,I024 closed
 ```
 
 ## 3. How an article joins a story (built, D-024 and D-028)
@@ -166,7 +167,7 @@ flowchart LR
     D --> S["Student: bge-reranker-v2-m3 (app.train)<br/>learns same story yes / no<br/>top 4 layers + head, 2 epochs"]
     S --> C{"better than before<br/>on the 10% held out?"}
     C -- "no" --> STOP["not saved, the run stops"]
-    C -- "yes: AUC 0.908 → 0.967<br/>accuracy 0.86 → 0.931" --> M[("models/ce-same-story")]
+    C -- "yes (2026-10-25): AUC 0.874 → 0.942<br/>accuracy 0.82 → 0.88" --> M[("models/ce-same-story")]
     M --> G["app.group decides with it<br/>(section 3)"]
     GOLD[("gold_pairs: 250 pairs<br/>labelled by Claude (D-029)")] -. "measures only, never trains" .-> CMP["app.compare: cosine, TF-IDF,<br/>zero-shot models, LLM, student"]
     M -.-> CMP
@@ -186,7 +187,7 @@ flowchart LR
     G2 --> G3["G-3 Compare<br/>every model on the gold set"]
     G3 --> CHK{"student beats<br/>the baselines?"}
     CHK -- "no" --> G4
-    CHK -- "yes: AUC 0.966,<br/>cosine 0.918" --> CUT["Set the cut-offs on the gold set<br/>student's best 0.485: keep 0.5"]
+    CHK -- "yes: AUC 0.976 (2026-10-25),<br/>cosine 0.918" --> CUT["Set the cut-offs on the gold set<br/>student's best 0.485: keep 0.5"]
 
     classDef done fill:#d4edda,stroke:#2e7d32,color:#000
     classDef testing fill:#fff3cd,stroke:#b8860b,color:#000
@@ -210,7 +211,7 @@ flowchart TD
     NAME --> L
 ```
 
-Full run (2026-10-20): the 14,782 stories with 2 or more articles gave 62,039 candidate pairs, and 10,390 links were kept. The LLM named the 500 strongest: same_topic 330, unrelated 70, same_story 66, same_actor 34, follow_up 0. The strongest links are mostly look-alikes (market updates, horoscopes): the weight comes from the cross-encoder before fine-tuning (`BAAI/bge-reranker-v2-m3`), which rates look-alikes high.
+Full run (2026-10-25): the 18,321 stories with 2 or more articles gave 73,914 candidate pairs, and 15,760 links were kept. The LLM named the 500 strongest: same_topic 267, same_story 155, same_actor 42, unrelated 34, follow_up 2 (2026-10-20: 330, 66, 34, 70, 0). The strongest links are mostly look-alikes (market updates, horoscopes): the weight comes from the cross-encoder before fine-tuning (`BAAI/bge-reranker-v2-m3`), which rates look-alikes high.
 
 Walking the graph: a story's page (`GET /api/issues/{id}`) shows the stories linked to it in either direction, strongest first, up to 20, with links named `unrelated` hidden. Each one opens that story's page, with its own links, so you walk the graph one hop at a time. A multi-hop query (`WITH RECURSIVE` over `issue_links`) is planned.
 

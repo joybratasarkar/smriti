@@ -1,14 +1,12 @@
 # Smriti: where we stand
 
-_Last updated: 2026-10-25_
+_Last updated: 2026-10-26_
 
-**Now:** the MVP pipeline (D-024, D-027, D-028) runs end to end: bge-m3 towers, a cross-encoder student fine-tuned on the local LLM's labels, story links with LLM link types, a story page with key-moment dots (D-030) and a "Today's stories" front page (D-032, D-033). Last full result (2026-10-20 grouping, gold set of 199 pairs): student 92.5% right (AUC 0.966), the stories' precision 0.86, recall 0.67 (I-016). On 2026-10-25 the user found the Tiger Shroff shooting inside Tukaram Mundhe's FDA ad-notice story (I-023), which led to per-headline scoring (D-034) and hard-case rules for the teacher (D-035: teacher 91.5% → 94.5% on the gold set).
-
-**Running now (from 2026-10-25 12:14, detached under `systemd-inhibit`):** `logs/run_2026-10-25.sh`: the teacher relabels all 4000 training pairs → train → student scored on the gold set (`logs/compare3.out`) → embed → `group --reset` (~6–9 h) → links → link names → AI labels → front titles → stories' gold check (`logs/gold3.out`). Progress in `logs/run3.log`; `logs/run3.done` says how it ended (expected early 2026-10-26). Alive? `systemd-inhibit --list | grep smriti`. A reboot kills it: rerun the script (labels already written stay). The app shows half-built stories while it runs.
+**Now:** the MVP pipeline (D-024, D-027, D-028) runs end to end: bge-m3 towers, a cross-encoder student fine-tuned on the local LLM's labels, story links with LLM link types, a story page with key-moment dots (D-030) and a "Today's stories" front page (D-032, D-033). The 2026-10-25 run (teacher relabelled with hard-case rules, retrain, full regroup; D-034, D-035) fixed I-023: the Tiger Shroff shooting is its own story (314 articles, no FDA news). Student on the gold set: 93.5% right, AUC 0.976, precision 0.91, recall 0.82 (was 92.5%, 0.966, 0.87, 0.81). The stories: precision 0.91, recall 0.70 (was 0.86, 0.67); Nepal floods, flydubai and *Toxic* are one story each. Nothing is running.
 
 **Next 3 actions:**
-1. When `logs/run3.done` says `exit 0`: compare `logs/compare3.out` and `logs/gold3.out` with the numbers above (the gold set is now 250 pairs, D-035); check the Tiger Shroff shooting is its own story with the FDA notices as a connected story, and the split examples (Nepal, CJP, flydubai).
-2. Hand-check the front page's AI titles (I-022), then build the twice-daily automatic fetch of D-032.
+1. Hand-check the front page's new AI titles at http://localhost:5173 (I-022: 50 written 2026-10-25), then build the twice-daily automatic fetch of D-032 (data is from 2026-10-25 11:53).
+2. Grouping recall (I-016): the 18 same-story gold pairs still split, 15 with no link (`logs/gold3.out`); and check the CJP story (issue 8, 1,820 articles) for SIR / election-commission drift (I-001).
 3. A 2-line story summary, checked against the headlines like the titles and dot labels.
 
 **Waiting on the user:** feedback on the front page (http://localhost:5173) and the story page; how strict the title check should be (I-022).
@@ -17,14 +15,15 @@ _Last updated: 2026-10-25_
 
 Open problems: [`docs/ISSUES.md`](docs/ISSUES.md) · Decisions: [`docs/DECISIONS.md`](docs/DECISIONS.md) · Diagrams: [`docs/WORKFLOW.md`](docs/WORKFLOW.md) · How it works: [`docs/TECHNICAL.md`](docs/TECHNICAL.md)
 
-## Data snapshot (2026-10-25)
+## Data snapshot (2026-10-26)
 
 | | |
 |---|---|
 | Articles | 149,641, Aug 21 – Oct 25 2026; last fetch 2026-10-25 11:53 IST (RSS + GDELT, 6 days) |
-| Embeddings, stories, links | As of the 2026-10-20 grouping: 138,229 embedded; 72,591 stories (14,782 with 2+ articles); 10,390 links. Rebuilt by the running job |
+| Embeddings, stories, links | As of the 2026-10-25 grouping: 149,641 embedded, 148,502 grouped; 83,636 stories (18,321 with 2+ articles; largest 1,820, CJP); 15,760 links, 500 named |
 | Gold pairs | 250: 200 in four cosine strata (196 by Claude, 4 by the user) + 50 shared-name (Claude, 2026-10-25) |
 | Training pairs | 4,000 (3,000 cosine strata + 1,000 shared-name), relabelled 2026-10-25; old labels in `train_pairs_before_d035` |
+| AI text | 1,907 dot labels (300 biggest stories), 103 front titles (`story_titles`) |
 | Last LLM test | 2026-10-20: 30/30 ran, quotes verified 128/146 (88%), 21.3 s/article |
 
 ## How to run
