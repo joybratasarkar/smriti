@@ -18,6 +18,8 @@ flowchart LR
     V --> G["app.group<br/>towers + fine-tuned<br/>cross-encoder (section 3)"]
     T["app.teach + app.train<br/>the LLM teaches the<br/>cross-encoder (section 5)"] --> G
     G --> I[("issues + article_issues<br/>= the stories")]
+    I --> CAT["app.categories<br/>9 categories + India / World<br/>LLM labels, classifier (D-036)"]
+    CAT --> API
     I --> LK["app.links<br/>weight + LLM type (section 6)"]
     LK --> L[("issue_links<br/>= the edges")]
     I --> API["FastAPI<br/>app.api + app.moments<br/>key moments (D-030)"] --> UI["Svelte UI<br/>story path: dots to 'now'<br/>+ connected stories"]
@@ -33,7 +35,7 @@ flowchart LR
     classDef planned fill:#eeeeee,stroke:#888,color:#000
     classDef blocked fill:#f8d7da,stroke:#c62828,color:#000
     class RSS,GD,F,A,E,V,T,I,LK,L,API,UI,ML done
-    class G,X testing
+    class G,X,CAT testing
     class EV planned
 ```
 
@@ -47,7 +49,6 @@ IDs link to [`ISSUES.md`](ISSUES.md). P1 issues are marked with ★.
 flowchart LR
     subgraph OPEN["Open"]
         direction TB
-        I022["★ I-022<br/>AI titles can be false"]
         I005["I-005<br/>duplicate events"]
         I011["I-011<br/>old NVIDIA package"]
         I012["I-012<br/>git credential warning"]
@@ -61,6 +62,8 @@ flowchart LR
         I003["I-003<br/>action_type"]
         I004["I-004<br/>speculation as fact"]
         I015["I-015<br/>daily columns chain"]
+        I022["★ I-022<br/>AI titles can be false"]
+        I025["I-025<br/>weak category classifier"]
     end
     subgraph BLOCK["Blocked"]
         direction TB
@@ -88,7 +91,7 @@ flowchart LR
     classDef normal fill:#fff,stroke:#888,color:#000
     classDef closed fill:#d4edda,stroke:#2e7d32,color:#000
     class I016,I001,I002,I022 p1
-    class I018,I005,I011,I012,I003,I004,I015,NONE normal
+    class I018,I005,I011,I012,I003,I004,I015,I025,NONE normal
     class I006,I007,I008,I009,I010,I013,I014,I017,I019,I020,I021,I023,I024 closed
 ```
 

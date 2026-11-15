@@ -133,3 +133,16 @@ CREATE TABLE IF NOT EXISTS story_titles (
     model       TEXT NOT NULL,              -- the LLM that wrote it
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- D-036: news categories. The LLM labels a sample of articles (keyed by article, so labels survive a regroup);
+-- app.categories fits a small classifier on their bge-m3 vectors and writes every story's category and region.
+CREATE TABLE IF NOT EXISTS article_categories (
+    article_id  BIGINT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+    category    TEXT NOT NULL,              -- one of app.categories.CATEGORIES
+    region      TEXT NOT NULL CHECK (region IN ('India', 'World')),
+    model       TEXT NOT NULL,              -- the LLM that labelled it
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;   -- predicted by app.categories; NULL until it runs
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS region TEXT;     -- 'India' or 'World'
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS category_by TEXT; -- 'llm' (front-page stories) or 'classifier'

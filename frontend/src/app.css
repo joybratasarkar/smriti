@@ -55,9 +55,11 @@ main.wide { max-width: 1140px; }
 /* Top bar (D-032): name, topic tabs, search, and when the news was last checked. */
 .topbar {
   max-width: 1140px; margin: 0 auto; padding: 18px 20px 10px;
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px 24px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 24px;
 }
-.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+/* The category tabs (D-036) get their own row under the logo, search and time. */
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; grid-column: 1 / -1; grid-row: 2; }
+.find { justify-self: end; }
 .tabs a { padding: 6px 10px; color: var(--muted); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; }
 .tabs a:hover { color: var(--text); }
 .tabs a[aria-current='page'] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
@@ -225,6 +227,9 @@ main { padding-block: 16px 64px; }
 .page-title { margin: 8px 0 4px; font-size: 1.5rem; letter-spacing: -0.01em; }
 .front-head { margin-bottom: 14px; }
 .front-head p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.regions { display: flex; gap: 4px; margin-top: 10px; }
+.regions a { padding: 3px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 0.85rem; color: var(--muted); text-decoration: none; }
+.regions a[aria-current='page'] { background: var(--text); border-color: var(--text); color: var(--surface); }
 .fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
 @media (max-width: 900px) { .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
@@ -239,10 +244,8 @@ main { padding-block: 16px 64px; }
 .fcard.lead h2 { font-size: clamp(1.4rem, 3vw, 1.9rem); line-height: 1.2; max-width: 32ch; }
 .ftag { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--muted); }
 .ftag .new { color: var(--accent); font-weight: 700; }
-.ftag .developing { color: var(--active); font-weight: 700; }
 .latest { margin: 0; font-size: 0.92rem; }
 .latest span { color: var(--muted); }
-.lead-heads { margin: 0; padding: 0 0 0 12px; list-style: none; display: grid; gap: 4px; font-size: 0.9rem; color: var(--muted); border-left: 3px solid var(--border); }
 .fmeta { margin: auto 0 0; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .minipath { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 26px; padding-inline: 2px; }
 .fcard.lead .minipath { min-height: 40px; }

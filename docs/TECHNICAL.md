@@ -2,7 +2,7 @@
 
 How the system works today: how data comes in, how it is stored, how articles are grouped into issues, and how the timeline is built. For run commands and current status, see [`PROGRESS.md`](../PROGRESS.md); for open problems, [`ISSUES.md`](ISSUES.md); for why, [`DECISIONS.md`](DECISIONS.md).
 
-_Last updated: 2026-10-10. Covers Step 1, Step 2 and the read-only web app._
+_Last updated: 2026-10-26. Covers Step 1, Step 2 and the read-only web app._
 
 ---
 
@@ -114,6 +114,8 @@ Indexes: `published_at`, `content_hash`.
 | `centroid` | `vector(1024)` NOT NULL | Mean of member embeddings |
 | `article_count` | INT | |
 | `first_seen` / `last_seen` | TIMESTAMPTZ | Earliest and latest member article date |
+| `category`, `region` | TEXT | One of the 9 categories and `India` / `World` (D-036, `app/categories.py`); NULL until it runs |
+| `category_by` | TEXT | `llm` (front-page stories) or `classifier` |
 | `created_at` | TIMESTAMPTZ | |
 
 Index: `last_seen`.
@@ -166,6 +168,10 @@ Same columns as `gold_pairs` plus `labeled_by` (the LLM); labels without `unsure
 
 `moment_key` (md5 of the story's **newest** moment's sorted article ids, primary key), `title` (5 to 9 words), `model`, `created_at`. A story gets a new title only when it gets a new newest dot. No foreign key to `issues` on purpose: `app.group --reset` truncates `issues` (D-033).
 
+### `article_categories`: LLM category labels for sampled articles (D-036, `app/categories.py`)
+
+`article_id` (PK → `articles(id)` ON DELETE CASCADE), `category`, `region` (`India` / `World`), `model`, `created_at`. Keyed by article, so the labels survive a regroup; they train the story classifier.
+
 ### Entity relationships
 
 ```
@@ -192,7 +198,7 @@ The planned Step 3/4 tables (events, people, organizations, places, and the edge
 
 **Incremental single-pass clustering**, so issue IDs stay stable as news arrives, with a two-stage decision (D-024):
 
-1. Load unassigned embedded articles, **oldest first**, 2,000 at a time (progress is committed per chunk, so a crash loses little). Left out: blank titles (I-017) and second copies of an article, meaning the same site and `content_hash` within a day (I-019).
+1. Load unassigned embedded articles, **oldest first**, 2,000 at a time (progress is committed per chunk, so a crash loses little). Left out: blank titles (I-017), second copies of an article, meaning the same site and `content_hash` within a day (I-019), and headlines with Devanagari letters (English only for now, D-038). Hindi headlines grouped before D-038 are taken out of their stories at the start of every run (`leave_out_hindi`); stories left empty are deleted.
 2. **Towers:** cosine between the article vector and the centroid of every story active in the **30 days** before it, on the GPU. The 3 best with cosine **≥ 0.40** are candidates. No candidate: new story.
 3. **Near-duplicate:** best cosine **≥ 0.92** joins directly, without the cross-encoder.
 4. **Fine-tuned cross-encoder** (`models/ce-same-story`, from `app/train.py`): reads the article against each of the candidate's 3 member headlines **closest to the article**, one pair at a time as in training, and takes the **mean** as P(same story) (D-034, 2026-10-25; before, the 3 were joined into one text, which let one shared name carry a new event in, I-023; until 2026-10-24 the latest 3, which split events, I-016). Member vectors are kept in memory as float16. Best **≥ 0.5** joins (stored in `article_issues.probability`); otherwise a new story. About 0.1 s per article for 3 candidates on the GTX 1650 with joined text; up to 9 pairs per article since D-034. Below near-duplicate it decides every case, because look-alikes are often different stories (daily horoscopes, two El Niño articles; D-028).
@@ -222,15 +228,22 @@ Rerun both after `app.group`. `app.group --reset` deletes all links (new issue I
 
 1. **Cut** (on every `GET /api/issues/{id}`, about 0.2 s for 224 articles): the story's articles become one moment per day (Indian time); the two neighbouring moments with the highest score merge until at most **7** remain. Score = cosine of their mean bge-m3 vectors − 0.02 per quiet day between them − 0.5 × their share of the story, + 0.15 when one holds under 4% of it. A gap-only rule failed: news comes almost every day. Stories with fewer than **4** articles get no path (`mode: "list"`).
 2. **Headlines:** each moment's distinct headlines, most central first; copies of one headline are folded into its `outlets`.
-3. **Label** (`python -m app.moments --label N`, the N biggest stories): the LLM writes 4 to 7 plain words from the moment's 6 most central headlines. Every capitalised word and number must appear in those headlines (commas in numbers ignored), or no label is stored and the page shows the trimmed central headline; an empty or unreadable LLM answer is treated the same (I-024). A rerun keeps labels already stored. Last run (2026-10-25, 300 stories): 1,882 written, 185 failed the check.
+3. **Label** (`python -m app.moments --label N`, the N biggest stories): the LLM writes 4 to 7 plain words from the moment's 6 most central headlines. Every capitalised word and number must appear in those headlines (commas in numbers ignored), and the LLM as referee (`moments.supported`, I-022) must find a headline that backs what the label claims, or no label is stored and the page shows the trimmed central headline. Front-page titles get the same two checks; an empty or unreadable LLM answer is treated the same (I-024). A rerun keeps labels already stored. Last run (2026-10-25, 300 stories): 1,882 written, 185 failed the check.
 
 ## 5d. The front page, "Today's stories" (`app/front.py`, D-032)
 
 1. **Rank** (on every `GET /api/front`, about 0.5 s): stories with articles published in the 48 hours before the last fetch, ranked by distinct outlets (sites) in that window, then by reports in it. Stories with fewer than **4** articles are left out.
-2. **Topic:** the most common topic among the story's article links, read from the first 3 path parts (`/world/`, `/india-news/`, `/business/`, `/city/` ...; word lists in `front.SECTIONS`). Links that only say `/news/` or `/article/` don't count; a story with no known section goes under **More**. Tabs with fewer than 3 stories are hidden.
-3. **Left out:** stories whose most common section is a repeating column or paid content (`/astrology/`, `/brandhub/`, `/trending/`), or where most headlines match `front.JUNK_TITLE` (horoscope, "gold rate today", wishes ...). `#/all` still lists them.
-4. **Card:** title from `story_titles`, else the trimmed central headline; the moments' sizes for the mini dot-path; "Latest:" = the newest moment's label, else its trimmed headline; **New** when the story began inside the window, else **Developing · day N** counted from `first_seen`.
-5. **Titles** (`python -m app.front --titles N`, the N top stories): the LLM writes 5 to 9 words from the story's 6 most central headlines, with the dot labels' check (section 5c), and labels the newest moment if it has no label. First run 2026-10-25: 54 of 60 titles passed, one of those was false and was deleted (I-022).
+2. **Category and region:** `issues.category` and `issues.region` from `app.categories` (section 5e); the tabs are the 9 categories, with an All / India / World switch. A story not yet labelled shows as Society · India. Tabs with fewer than 3 stories are hidden.
+3. **Left out:** stories where most articles are in a repeating column or paid content (`/astrology/`, `/brandhub/`, `/trending/` in the first 3 path parts, `front.JUNK_SECTIONS`) or have headlines matching `front.JUNK_TITLE` (horoscope, "gold rate today", wishes ...). `#/all` still lists them.
+4. **Card** (D-037): category · region, **New** when the story began inside the window; title from `story_titles`, else the trimmed central headline; "Latest:" = the newest moment's label, else its trimmed headline; outlets and time since the last report; the moments' sizes for the lead card's mini dot-path.
+5. **Titles** (`python -m app.front --titles N`, the N top stories): the LLM writes 5 to 9 words from the story's 6 most central headlines, with the dot labels' two checks (section 5c), and labels the newest moment if it has no label. First run 2026-10-25: 54 of 60 titles passed, one of those was false and was deleted (I-022); the referee's recheck on 2026-10-26 removed 4 of 53.
+
+## 5e. News categories (`app/categories.py`, D-036)
+
+Teacher and student, as for grouping. Run after every `app.group`.
+1. **Teacher** (`python -m app.categories --label N`): the local LLM labels N more articles, one per story, with a category and India / World, first saying in a few words what the article is about (74/80 against Claude's labels). Stored in `article_categories`.
+2. **Student** (`python -m app.categories`): a softmax regression on the labelled articles' bge-m3 vectors (5-fold agreement with the LLM logged) labels every story's centroid in seconds (`category_by = 'classifier'`). 71% agreement, Sports almost never predicted (I-025).
+3. **Front-page stories** (`--stories`): the LLM labels each front-page story from its main headlines (`category_by = 'llm'`), overriding the classifier.
 
 ---
 
@@ -240,7 +253,7 @@ The API is FastAPI, read-only, and returns JSON. Run it with `uvicorn app.api:ap
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/front` | The front page (section 5d). Params: `topic` = `Top` or a tab name; `limit` (0–50, default 13; 0 returns only the tabs and `checked`, for the top bar); `offset`. Returns `{checked, since, tabs[{name, count}], total, stories[]}`, each story with `id, topic, outlets, recent, reports, first_seen, last_seen, title, title_ai, new, day, latest, latest_ai, latest_heads[], dots[]` (article count per moment) |
+| `GET /api/front` | The front page (section 5d). Params: `topic` = `Top` or a category; `region` = `All`, `India` or `World`; `limit` (0–50, default 13; 0 returns only the tabs and `checked`, for the top bar); `offset`. Returns `{checked, since, tabs[{name, count}], total, stories[]}`, each story with `id, category, region, outlets, recent, reports, first_seen, last_seen, title, title_ai, new, latest, latest_ai, dots[]` (article count per moment) |
 | `GET /api/summary` | Header stats: article, issue and multi-article issue counts, source count (news sites), oldest and newest publish date, last fetch time |
 | `GET /api/issues` | Issue list. Params: `sort` = `recent` (by `last_seen`) or `biggest` (by `article_count`); `min_size` (default 2, hides single-article issues); `q` (case-insensitive search over **member article titles**); `limit` (1–200, default 50); `offset`. Returns `{total, issues[]}`, where each issue has `id, label, article_count, first_seen, last_seen, source_count, sources[]` |
 | `GET /api/issues/{id}` | One issue plus all its articles (`id, title, url, snippet, source_name, language, published_at, similarity, probability`), ordered oldest first; `links`: up to 20 connected stories (`id, label, article_count, first_seen, last_seen, link_type, weight, evidence`), strongest first, `unrelated` hidden; `mode` (`path` or `list`) and `moments` (`start, end, count, label, labelled, heads[{title, time, outlets[{name, url}]}], more`, section 5c); `checked`: the last fetch time. Returns 404 if the issue is missing |
@@ -255,11 +268,11 @@ The frontend uses Svelte 5 (runes: `$state`, `$derived`, `$effect`) and Vite 6, 
 
 ### Routing (`App.svelte`)
 
-A minimal hash router: `#/` is the front page, `#/topic/World` one topic tab, `#/all` every story, `#/search/<words>` the search results (the list with that search), and `#/issues/42` one story. The top bar (D-032) has the name, the topic tabs from `/api/front?limit=0`, a search box that goes to `#/search/…`, and "checked HH:MM", which turns amber ("news may be out of date · last checked 20 Oct") when the last fetch is more than 24 hours old.
+A minimal hash router: `#/` is the front page, `#/topic/Sports` one category tab, `#/topic/Sports/India` that tab in one region (`#/topic/Top/World`: every category), `#/all` every story, `#/search/<words>` the search results (the list with that search), and `#/issues/42` one story. The top bar (D-032) has the name (logo "S", D-038), the topic tabs from `/api/front?limit=0`, a search box that goes to `#/search/…`, and "checked HH:MM", which turns amber ("news may be out of date · last checked 20 Oct") when the last fetch is more than 24 hours old.
 
 ### Front page (`FrontPage.svelte`, `StoryCard.svelte`)
 
-One lead card (bigger title, wider dot-path, the newest moment's two headlines), then a grid of 12 cards (3 columns, 2 under 900 px, 1 under 600 px) and "Show 12 more". The mini dot-path has no labels: dots evenly spaced, size by the moment's share, the newest in the accent colour, then a pulsing green "now". The whole card links to the story page.
+An All / India / World switch, one lead card (bigger title and the mini dot-path), then a grid of 12 cards (3 columns, 2 under 900 px, 1 under 600 px) and "Show 12 more". Cards follow D-037 (section 5d). The mini dot-path has no labels: dots evenly spaced, size by the moment's share, the newest in the accent colour, then a pulsing green "now". The whole card links to the story page.
 
 ### Issue list, "All stories" (`IssueList.svelte`)
 

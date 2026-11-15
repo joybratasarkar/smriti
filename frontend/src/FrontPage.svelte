@@ -3,7 +3,9 @@
   import { getJSON } from './lib/format.js'
 
   // "Today's stories" (D-032): one lead story, then 12 cards at a time, most outlets first.
-  let { topic = 'Top' } = $props()
+  // `topic` is a category tab (D-036) or 'Top'; `region` is 'All', 'India' or 'World'.
+  let { topic = 'Top', region = 'All' } = $props()
+  const REGIONS = ['All', 'India', 'World']
   const FIRST = 13
   const PAGE = 12
 
@@ -16,7 +18,7 @@
     loading = true
     error = ''
     const offset = stories.length
-    const params = new URLSearchParams({ topic, offset, limit: offset ? PAGE : FIRST })
+    const params = new URLSearchParams({ topic, region, offset, limit: offset ? PAGE : FIRST })
     try {
       const data = await getJSON(`/api/front?${params}`)
       stories = [...stories, ...data.stories]
@@ -33,6 +35,13 @@
 <div class="front-head">
   <h1 class="page-title">{topic === 'Top' ? "Today's stories" : topic}</h1>
   <p>Most reported in the 48 hours before the last check, by number of outlets</p>
+  <nav class="regions" aria-label="Region">
+    {#each REGIONS as r (r)}
+      <a href={r === 'All' ? (topic === 'Top' ? '#/' : `#/topic/${encodeURIComponent(topic)}`)
+                           : `#/topic/${encodeURIComponent(topic)}/${r}`}
+         aria-current={r === region ? 'page' : undefined}>{r}</a>
+    {/each}
+  </nav>
 </div>
 
 {#if error}

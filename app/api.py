@@ -49,12 +49,13 @@ def summary():
 @app.get("/api/front")
 def front_page(
     topic: str = Query("Top", pattern="^(Top|" + "|".join(front.TABS) + ")$"),
+    region: str = Query("All", pattern="^(All|India|World)$"),
     limit: int = Query(13, ge=0, le=50),     # limit=0: just the tabs and when news was checked, for the top bar
     offset: int = Query(0, ge=0),
 ):
     with db() as conn:
         register_vector(conn)
-        return front.front(conn, outlets(conn), topic, offset, limit)
+        return front.front(conn, outlets(conn), topic, region, offset, limit)
 
 
 @app.get("/api/issues")

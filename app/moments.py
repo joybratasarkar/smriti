@@ -9,7 +9,8 @@ the moment's articles: when a moment gains or loses articles its old label no lo
 headline is shown until it is labelled again.
 
 A label is 4 to 7 plain words written by the LLM from the moment's own headlines. Every name and number in it must
-appear in those headlines, otherwise the trimmed headline is used (the LLM gets names wrong, I-002).
+appear in those headlines, and the LLM as referee must find that the headlines back what it claims (I-022),
+otherwise the trimmed headline is used (the LLM gets names wrong, I-002, and can change a fact).
 """
 
 import argparse
@@ -121,6 +122,30 @@ def safe(label: str, titles: list[str]) -> bool:
     return True
 
 
+REFEREE = ("You check a short news title against the headlines it was written from. A title may summarise several "
+           "headlines, use other words and leave details out: that is fine. It is wrong only when it states a fact "
+           "the headlines contradict or never say, for example 'shot' when the headlines say 'shot at' or 'firing', "
+           "'killed' when they say 'threatened' or 'injured', a different number, a plan or threat stated as done, "
+           "the wrong person doing something. First copy the headline that best backs the title, then give the "
+           "verdict. Return JSON only.")
+REFEREE_SCHEMA = {"type": "object", "properties": {"evidence": {"type": "string"},
+                                                   "verdict": {"type": "string", "enum": ["fine", "wrong"]}},
+                  "required": ["evidence", "verdict"]}
+
+
+def supported(client: httpx.Client, text: str, titles: list[str]) -> bool:
+    """The LLM as referee (I-022): do the headlines back what this label or title claims? safe() only checks that
+    its names and numbers appear in them, which let "Tiger Shroff shot in Juhu" through (he was shot at).
+    On the 53 front-page titles of 2026-10-26 plus 4 planted false ones it rejected both Tiger Shroff titles, 2 of
+    the 4 planted ones (safe() catches a third, a changed number) and 3 others, 1 of them a false alarm."""
+    out, _ = ollama.chat(client, ollama.MODEL, REFEREE,
+                         f"Title: {text}\nHeadlines:\n" + "\n".join(f"- {t}" for t in titles), REFEREE_SCHEMA, 2048)
+    try:
+        return json.loads(out)["verdict"] == "fine"
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False  # an unreadable verdict is not a yes
+
+
 def key_of(group: list[dict]) -> str:
     return hashlib.md5(",".join(str(a["id"]) for a in sorted(group, key=lambda a: a["id"])).encode()).hexdigest()
 
@@ -163,7 +188,7 @@ def label_moment(conn, client: httpx.Client, issue_id: int, group: list[dict]) -
         label = json.loads(out).get("label", "").strip().rstrip(".")
     except (json.JSONDecodeError, AttributeError):  # an empty or broken answer: show the headline, as for a failed check
         return "fallback"
-    if not safe(label, titles):
+    if not (safe(label, titles) and supported(client, label, titles)):
         return "fallback"
     conn.execute("INSERT INTO moment_labels (moment_key, issue_id, label, model) VALUES (%s, %s, %s, %s) "
                  "ON CONFLICT (moment_key) DO NOTHING", (k, issue_id, label, ollama.MODEL))

@@ -4,12 +4,13 @@ Run with:  python -m app.front --titles 60   (the LLM writes clean titles for th
 
 The front page shows the stories most reported in the 48 hours before the last fetch, ranked by how many different
 outlets reported them, then by reports. Stories with fewer than MIN_REPORTS reports and repeating columns (horoscopes,
-"gold rate today", paid content) are left out; search still finds them. A story's topic tab is the most common
-section in its articles' links (/world/, /business/, ...); stories whose links only say /news/ go under More.
+"gold rate today", paid content) are left out; search still finds them. Each story sits under its category tab
+and its region (India / World), both from app.categories (D-036).
 
 A title is 5 to 9 plain words written by the LLM from the story's main headlines, with the same check as the dot
-labels (every name and number must be in the headlines), else the trimmed central headline. Titles are keyed by the
-story's newest moment, so a story gets a new title only when it gets a new newest dot.
+labels (every name and number must be in the headlines, and the LLM referee must find that the headlines back
+it, I-022), else the trimmed central headline. Titles are keyed by the story's newest moment, so a story gets a
+new title only when it gets a new newest dot.
 """
 
 import argparse
@@ -23,25 +24,17 @@ from urllib.parse import urlparse
 import httpx
 
 from app import moments, ollama
+from app.categories import CATEGORIES
 from app.db import connect_with_vectors
 
 WINDOW = timedelta(hours=48)
 MIN_REPORTS = 4
 MIN_TAB = 3        # tabs with fewer stories are hidden
 MAIN_HEADLINES = 6
-TABS = ["India", "World", "Business", "Sports", "Entertainment", "Tech", "More"]
+TABS = list(CATEGORIES)
 
-# Link path words -> topic. "junk" marks repeating columns and paid content.
-SECTIONS = {
-    "World": {"world", "world-news", "international", "us-news", "australia-news", "global", "nri", "us", "europe"},
-    "India": {"india", "india-news", "national", "city", "cities", "politics-and-nation", "delhi-news", "states"},
-    "Business": {"business", "markets", "market", "money", "industry", "companies", "economy", "wealth", "small-biz",
-                 "real-estate", "stocks", "personal-finance", "india-business", "banking"},
-    "Sports": {"sports", "sport", "cricket", "football", "tennis", "hockey"},
-    "Entertainment": {"entertainment", "movies", "tv", "bollywood", "etimes", "htcity", "celebrities", "music", "web-series"},
-    "Tech": {"technology", "tech", "gadgets-and-appliances", "gadgets", "ai", "sci-tech", "science", "auto-news", "auto"},
-    "junk": {"astrology", "horoscope", "brandhub", "pr-release", "trending", "trending-news"},
-}
+# Link path words that mark repeating columns and paid content.
+JUNK_SECTIONS = {"astrology", "horoscope", "brandhub", "pr-release", "trending", "trending-news"}
 JUNK_TITLE = re.compile(r"horoscope|rashifal|quote of the day|sensex today|nifty today|gold (rate|price)s? today|"
                         r"silver (rate|price)s? today|petrol.*price.*today|lottery result|wishes|greetings", re.I)
 
@@ -57,7 +50,7 @@ CANDIDATES_SQL = """
         WHERE a.published_at >= %(since)s AND btrim(a.title) <> ''
         GROUP BY ai.issue_id
     )
-    SELECT r.issue_id, r.outlets, r.recent, i.article_count, i.first_seen, i.last_seen
+    SELECT r.issue_id, r.outlets, r.recent, i.article_count, i.first_seen, i.last_seen, i.category, i.region
     FROM recent r JOIN issues i ON i.id = r.issue_id
     WHERE i.article_count >= %(min)s
     ORDER BY r.outlets DESC, r.recent DESC, i.id
@@ -66,13 +59,9 @@ CANDIDATES_SQL = """
 log = logging.getLogger("front")
 
 
-def section(url: str) -> str | None:
-    """The topic named by the first 3 parts of a link's path, or None when it only says /news/ or /article/."""
-    for part in [p for p in urlparse(url).path.lower().split("/") if p][:3]:
-        for topic, words in SECTIONS.items():
-            if part in words:
-                return topic
-    return None
+def junk_section(url: str) -> bool:
+    """True when one of the first 3 parts of a link's path names a repeating column or paid content."""
+    return any(p in JUNK_SECTIONS for p in urlparse(url).path.lower().split("/")[:4])
 
 
 def pool(conn) -> tuple:
@@ -86,43 +75,39 @@ def pool(conn) -> tuple:
                                              ([r[0] for r in found],)):
         links.setdefault(issue_id, []).append((url, title))
     stories = []
-    for issue_id, outlets, recent, count, first, last in found:
+    for issue_id, outlets, recent, count, first, last, category, region in found:
         arts = links[issue_id]
-        topics = Counter(t for t in (section(u) for u, _ in arts) if t)
-        topic = topics.most_common(1)[0][0] if topics else "More"
-        if topic == "junk" or 2 * sum(bool(JUNK_TITLE.search(t)) for _, t in arts) > len(arts):
+        if 2 * sum(junk_section(u) or bool(JUNK_TITLE.search(t)) for u, t in arts) > len(arts):
             continue
-        stories.append({"id": issue_id, "topic": topic, "outlets": outlets, "recent": recent, "reports": count,
-                        "first_seen": first, "last_seen": last})
+        stories.append({"id": issue_id, "category": category or "Society", "region": region or "India",
+                        "outlets": outlets, "recent": recent, "reports": count, "first_seen": first, "last_seen": last})
     return checked, since, stories
 
 
-def card(conn, story: dict, names: dict[str, str], checked, since) -> dict:
-    """A story as the front page shows it: title, mini dot-path, latest moment, New / Developing tag."""
+def card(conn, story: dict, names: dict[str, str], since) -> dict:
+    """A story as the front page shows it: title, latest moment, New tag, and the dot-path the lead card draws."""
     articles, groups = moments.compute(conn, story["id"], names)
     keys = [moments.key_of(g) for g in groups]
     title = moments.rows(conn, "SELECT title FROM story_titles WHERE moment_key = %s", (keys[-1],))
     newest = moments.headlines(groups[-1])
     label = moments.rows(conn, "SELECT label FROM moment_labels WHERE moment_key = %s", (keys[-1],))
-    first_day = story["first_seen"].astimezone(moments.IST).date()
     return {**story,
             "title": title[0][0] if title else moments.trim(moments.headlines(articles)[0]["title"]),
             "title_ai": bool(title),
             "new": story["first_seen"] >= since,
-            "day": (checked.astimezone(moments.IST).date() - first_day).days + 1,
             "latest": label[0][0] if label else moments.trim(newest[0]["title"]),
             "latest_ai": bool(label),
-            "latest_heads": [h["title"] for h in newest[:2]],
             "dots": [len(g) for g in groups]}
 
 
-def front(conn, names: dict[str, str], topic: str, offset: int, limit: int) -> dict:
+def front(conn, names: dict[str, str], topic: str, region: str, offset: int, limit: int) -> dict:
+    """Stories of one category tab ("Top": all of them) and region ("All": both), most outlets first."""
     checked, since, stories = pool(conn)
-    counts = Counter(s["topic"] for s in stories)
+    counts = Counter(s["category"] for s in stories)
     tabs = [{"name": t, "count": counts[t]} for t in TABS if counts[t] >= MIN_TAB]
-    chosen = stories if topic == "Top" else [s for s in stories if s["topic"] == topic]
+    chosen = [s for s in stories if topic in ("Top", s["category"]) and region in ("All", s["region"])]
     return {"checked": checked, "since": since, "tabs": tabs, "total": len(chosen),
-            "stories": [card(conn, s, names, checked, since) for s in chosen[offset:offset + limit]]}
+            "stories": [card(conn, s, names, since) for s in chosen[offset:offset + limit]]}
 
 
 def write_titles(conn, limit: int) -> None:
@@ -141,8 +126,12 @@ def write_titles(conn, limit: int) -> None:
                 continue
             heads = [h["title"] for h in moments.headlines(articles)[:MAIN_HEADLINES]]
             out, _ = ollama.chat(client, ollama.MODEL, SYSTEM, "Headlines:\n" + "\n".join(f"- {t}" for t in heads), SCHEMA, 2048)
-            title = json.loads(out).get("title", "").strip().rstrip(".")
-            if not (4 <= len(title.split()) <= 10 and moments.safe(title, heads)):
+            try:
+                title = json.loads(out).get("title", "").strip().rstrip(".")
+            except (json.JSONDecodeError, AttributeError):  # an empty or broken answer, as in I-024
+                title = ""
+            if not (4 <= len(title.split()) <= 10 and moments.safe(title, heads)
+                    and moments.supported(client, title, heads)):
                 log.info("  failed the check: %s", title)
                 done["title fallback"] += 1
                 continue

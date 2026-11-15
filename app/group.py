@@ -14,8 +14,9 @@ Each unassigned article, oldest first:
      when the matching headline had just dropped out of the window (I-016). Until 2026-10-25 it read the closest
      headlines joined into one text, where one shared name let a new event into an old story (I-023: the Tiger
      Shroff shooting joined the FDA ad-notice story).
-Articles with a blank title, and second copies of an article (same site, headline and snippet within a day,
-I-019), are left out. Progress is saved every CHUNK articles.
+Articles with a blank title, second copies of an article (same site, headline and snippet within a day,
+I-019) and Hindi headlines (English only for now, D-038) are left out; Hindi headlines grouped before that are
+taken out of their stories at the start of every run. Progress is saved every CHUNK articles.
 Then split stories are merged: stories whose centres are closer than MERGE_COSINE and at most WINDOW_DAYS
 apart are compared on their MERGE_PAIRS closest article pairs, and merge into the older one when the
 cross-encoder gives each of those pairs at least JOIN. Assigned articles otherwise never move, so issue ids stay stable.
@@ -46,6 +47,7 @@ CLOSEST = 3             # a story is shown to the cross-encoder as its members c
 MERGE_COSINE = 0.88     # story centres this close are checked for a split (633 pairs on 2026-10-20)
 MERGE_PAIRS = 3         # closest article pairs the cross-encoder reads per story pair
 CHUNK = 2000
+DEVANAGARI = "[\u0900-\u097F]"  # Hindi headlines; English only for now (D-038)
 
 log = logging.getLogger("group")
 
@@ -167,14 +169,14 @@ def load_unassigned(conn, limit: int):
         FROM articles a
         JOIN article_embeddings e ON e.article_id = a.id
         LEFT JOIN article_issues ai ON ai.article_id = a.id
-        WHERE ai.article_id IS NULL AND btrim(a.title) <> ''
+        WHERE ai.article_id IS NULL AND btrim(a.title) <> '' AND a.title !~ %s
           AND NOT EXISTS (SELECT 1 FROM articles d
                           WHERE d.source_domain = a.source_domain AND d.content_hash = a.content_hash AND d.id < a.id
                             AND abs(extract(epoch FROM coalesce(d.published_at, d.fetched_at)
                                                       - coalesce(a.published_at, a.fetched_at))) < 86400)
         ORDER BY ts, a.id
         LIMIT %s
-    """, (limit,)).fetchall()
+    """, (DEVANAGARI, limit)).fetchall()
     return [(article_id, title, snippet, ts, vec.to_numpy().astype(np.float32))
             for article_id, title, snippet, ts, vec in rows]
 
@@ -231,6 +233,41 @@ def save(conn, stories: Stories, assignments, touched: set[int]) -> None:
                         LIMIT 1)
                     WHERE id = %s
                 """, (stories.items[idx].id,))
+    conn.commit()
+
+
+def refresh(cur, issue_ids: list[int]) -> None:
+    """Recompute these stories' centre, size, dates and label from their members; delete the ones left empty."""
+    cur.execute("DELETE FROM issues i WHERE id = ANY(%s) AND NOT EXISTS "
+                "(SELECT 1 FROM article_issues ai WHERE ai.issue_id = i.id)", (issue_ids,))
+    cur.execute("""
+        UPDATE issues SET (centroid, article_count, first_seen, last_seen) = (
+            SELECT avg(e.embedding), count(*), min(coalesce(a.published_at, a.fetched_at)),
+                   max(coalesce(a.published_at, a.fetched_at))
+            FROM article_issues ai JOIN articles a ON a.id = ai.article_id
+            JOIN article_embeddings e ON e.article_id = a.id WHERE ai.issue_id = issues.id)
+        WHERE id = ANY(%s)
+    """, (issue_ids,))
+    cur.execute("""
+        UPDATE issues SET label = (
+            SELECT a.title FROM article_issues ai JOIN articles a ON a.id = ai.article_id
+            JOIN article_embeddings e ON e.article_id = ai.article_id
+            WHERE ai.issue_id = issues.id ORDER BY e.embedding <=> issues.centroid LIMIT 1)
+        WHERE id = ANY(%s)
+    """, (issue_ids,))
+
+
+def leave_out_hindi(conn) -> None:
+    """Take Hindi headlines grouped before D-038 out of their stories; a no-op once done."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            DELETE FROM article_issues ai USING articles a
+            WHERE a.id = ai.article_id AND a.title ~ %s RETURNING ai.issue_id
+        """, (DEVANAGARI,))
+        touched = sorted({r[0] for r in cur.fetchall()})
+        if touched:
+            refresh(cur, touched)
+            log.info("Took Hindi headlines out of %d stories (D-038)", len(touched))
     conn.commit()
 
 
@@ -301,21 +338,7 @@ def merge_splits(conn, cross_encoder: models.CrossEncoder) -> int:
                 continue
             cur.execute("UPDATE article_issues SET issue_id = %s WHERE issue_id = ANY(%s)", (ids[keep], gone))
             cur.execute("DELETE FROM issues WHERE id = ANY(%s)", (gone,))
-            cur.execute("""
-                UPDATE issues SET (centroid, article_count, first_seen, last_seen) = (
-                    SELECT avg(e.embedding), count(*), min(coalesce(a.published_at, a.fetched_at)),
-                           max(coalesce(a.published_at, a.fetched_at))
-                    FROM article_issues ai JOIN articles a ON a.id = ai.article_id
-                    JOIN article_embeddings e ON e.article_id = a.id WHERE ai.issue_id = issues.id)
-                WHERE id = %s
-            """, (ids[keep],))
-            cur.execute("""
-                UPDATE issues SET label = (
-                    SELECT a.title FROM article_issues ai JOIN articles a ON a.id = ai.article_id
-                    JOIN article_embeddings e ON e.article_id = ai.article_id
-                    WHERE ai.issue_id = issues.id ORDER BY e.embedding <=> issues.centroid LIMIT 1)
-                WHERE id = %s
-            """, (ids[keep],))
+            refresh(cur, [ids[keep]])
             merged += len(gone)
     conn.commit()
     log.info("Merge: %d close story pairs checked, %d passed, %d stories merged into older ones",
@@ -338,6 +361,7 @@ def main() -> None:
             conn.commit()
             log.info("Deleted all issues and links.")
 
+        leave_out_hindi(conn)
         articles = load_unassigned(conn, CHUNK)
         if not articles:
             log.info("No unassigned articles.")

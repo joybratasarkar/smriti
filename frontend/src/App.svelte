@@ -4,7 +4,8 @@
   import IssueDetail from './IssueDetail.svelte'
   import { getJSON, formatDay, formatTime } from './lib/format.js'
 
-  // Minimal hash router: #/ is the front page, #/topic/World one tab, #/all every story,
+  // Minimal hash router: #/ is the front page, #/topic/Sports one category tab, #/topic/Sports/India
+  // one tab in one region (#/topic/Top/World: every category), #/all every story,
   // #/search/<words> the search results, #/issues/42 one story.
   let hash = $state(location.hash)
   $effect(() => {
@@ -14,6 +15,7 @@
   })
   let issueId = $derived(hash.match(/^#\/issues\/(\d+)/)?.[1])
   let topic = $derived(decodeURIComponent(hash.match(/^#\/topic\/([^/]+)/)?.[1] ?? 'Top'))
+  let region = $derived(hash.match(/^#\/topic\/[^/]+\/(India|World)/)?.[1] ?? 'All')
   let search = $derived(hash.startsWith('#/search/') ? decodeURIComponent(hash.slice(9)) : null)
   let all = $derived(hash.startsWith('#/all') || search !== null)
 
@@ -33,16 +35,16 @@
 
 <header class="topbar">
   <a href="#/" class="brand">
-    <span class="mark">स्</span>
+    <span class="mark">S</span>
     <span>
       <strong>Smriti</strong>
       <small>news that remembers</small>
     </span>
   </a>
   <nav class="tabs" aria-label="Topics">
-    <a href="#/" aria-current={!issueId && !all && topic === 'Top' ? 'page' : undefined}>Top stories</a>
+    <a href={region === 'All' ? '#/' : `#/topic/Top/${region}`} aria-current={!issueId && !all && topic === 'Top' ? 'page' : undefined}>Top stories</a>
     {#each top?.tabs ?? [] as tab (tab.name)}
-      <a href="#/topic/{tab.name}" aria-current={!issueId && !all && topic === tab.name ? 'page' : undefined}>{tab.name}</a>
+      <a href="#/topic/{encodeURIComponent(tab.name)}{region === 'All' ? '' : `/${region}`}" aria-current={!issueId && !all && topic === tab.name ? 'page' : undefined}>{tab.name}</a>
     {/each}
   </nav>
   <form class="find" role="search" onsubmit={submit}>
@@ -69,8 +71,8 @@
       <IssueList initialQuery={search ?? ''} />
     {/key}
   {:else}
-    {#key topic}
-      <FrontPage {topic} />
+    {#key `${topic}/${region}`}
+      <FrontPage {topic} {region} />
     {/key}
   {/if}
 </main>
