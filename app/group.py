@@ -124,10 +124,12 @@ class Stories:
         return [(i, v) for v, i in zip(values.tolist(), indexes.tolist()) if v >= FLOOR]
 
 
-def assign(stories: Stories, articles, cross_encoder: models.CrossEncoder, counts: dict) -> list[tuple]:
+def assign(stories: Stories, articles, cross_encoder: models.CrossEncoder, counts: dict,
+           double: set[tuple[int, int]]) -> list[tuple]:
     """Group articles (id, title, snippet, when, vector) into stories, updating `stories` in place.
 
-    Returns (article_id, story index, cosine, probability or None, model or None) per article.
+    Returns (article_id, story index, cosine, probability or None, model or None) per article. When an article
+    passes JOIN for more than one story, those story indexes go into `double` for the merge pass (I-016).
     """
     assignments = []
     for article_id, title, snippet, when, vector in articles:
@@ -148,6 +150,7 @@ def assign(stories: Stories, articles, cross_encoder: models.CrossEncoder, count
             probs = np.bincount(owner, cross_encoder.score(batch), len(found)) / np.bincount(owner, None, len(found))
             best = int(np.argmax(probs))
             counts["cross_encoder_calls"] += 1
+            double.update((found[best][0], found[n][0]) for n in np.flatnonzero(probs >= JOIN) if n != best)
             if probs[best] >= JOIN:
                 idx, cosine = found[best]
                 probability, model = float(probs[best]), cross_encoder.name
@@ -271,12 +274,15 @@ def leave_out_hindi(conn) -> None:
     conn.commit()
 
 
-def merge_splits(conn, cross_encoder: models.CrossEncoder) -> int:
-    """Merge stories that are one event split in two (I-016). Returns how many stories were merged away."""
+def merge_splits(conn, cross_encoder: models.CrossEncoder, double: set[tuple[int, int]] = frozenset()) -> int:
+    """Merge stories that are one event split in two (I-016). Returns how many stories were merged away.
+
+    Checked: story pairs with close centres, and `double` (story ids one article passed JOIN for, of any size).
+    """
     rows = conn.execute("""
         SELECT id, centroid, extract(epoch FROM first_seen), extract(epoch FROM last_seen)
-        FROM issues WHERE article_count >= 2 ORDER BY first_seen, id
-    """).fetchall()
+        FROM issues WHERE article_count >= 2 OR id = ANY(%s) ORDER BY first_seen, id
+    """, (sorted({i for pair in double for i in pair}),)).fetchall()
     if len(rows) < 2:
         return 0
     ids = [r[0] for r in rows]
@@ -291,6 +297,10 @@ def merge_splits(conn, cross_encoder: models.CrossEncoder) -> int:
             close = (sims[row] >= MERGE_COSINE) & (gap <= WINDOW_DAYS * 86400)
             close[:i + 1] = False
             pairs += [(i, int(j)) for j in np.flatnonzero(close)]
+    row_of = {issue_id: k for k, issue_id in enumerate(ids)}
+    close_pairs = len(pairs)
+    pairs = sorted(set(pairs) | {tuple(sorted((row_of[a], row_of[b]))) for a, b in double
+                                 if a in row_of and b in row_of and a != b})
     if not pairs:
         return 0
 
@@ -341,8 +351,8 @@ def merge_splits(conn, cross_encoder: models.CrossEncoder) -> int:
             refresh(cur, [ids[keep]])
             merged += len(gone)
     conn.commit()
-    log.info("Merge: %d close story pairs checked, %d passed, %d stories merged into older ones",
-             len(pairs), int((weakest >= JOIN).sum()), merged)
+    log.info("Merge: %d story pairs checked (%d close centres, %d double yes), %d passed, %d stories merged "
+             "into older ones", len(pairs), close_pairs, len(pairs) - close_pairs, int((weakest >= JOIN).sum()), merged)
     return merged
 
 
@@ -374,14 +384,15 @@ def main() -> None:
         counts = {"articles": 0, "new_stories": 0, "joined_by_towers": 0,
                   "cross_encoder_calls": 0, "joined_by_cross_encoder": 0}
         started = time.time()
+        double: set[tuple[int, int]] = set()  # story indexes one article passed JOIN for
         while articles:
-            assignments = assign(stories, articles, cross_encoder, counts)
+            assignments = assign(stories, articles, cross_encoder, counts, double)
             save(conn, stories, assignments, {idx for _, idx, *_ in assignments})
             counts["articles"] += len(assignments)
             log.info("%d articles (up to %s), %.0f/s: %s", counts["articles"], f"{articles[-1][3]:%Y-%m-%d}",
                      counts["articles"] / (time.time() - started), counts)
             articles = load_unassigned(conn, CHUNK)
-        merge_splits(conn, cross_encoder)
+        merge_splits(conn, cross_encoder, {(stories.items[a].id, stories.items[b].id) for a, b in double})
 
 
 if __name__ == "__main__":
