@@ -4,6 +4,20 @@ An app that remembers the news. Normal news apps show the latest story and forge
 
 Accuracy rules: every event must be traceable to a source article, and we store attributed facts, not conclusions. Only links and metadata are stored, never full article text.
 
+## Words used here
+
+| Word | Means |
+|---|---|
+| **story** | A group of articles about one event or matter, followed over time. Stored in the `issues` table (an older name), with articles in `article_issues`; the API's `/api/issues` returns stories |
+| **link** | A weighted edge between two related stories (`issue_links`); together they form the story graph |
+| **moment** | A dot on a story's timeline: its articles from one or more neighbouring days |
+| **issue** (in `docs/ISSUES.md`, `I-xxx`) | A problem or open question in this project, not a news story |
+| **decision** (`D-xxx`) | A design choice and why it was made, in `docs/DECISIONS.md` |
+| **gold set** | Hand-checked article pairs, used only to measure grouping |
+| **teacher / student** | The local LLM labels examples (teacher); a small model trained on them does the bulk work (student) |
+
+`CLAUDE.md` and `.claude/skills/` are the working notes and commands used for AI-assisted development with Claude Code (`/status`, `/handoff`, `/refresh`). They describe how the work is done step by step; you don't need them to run Smriti.
+
 ## Status
 
 | Part | State |
