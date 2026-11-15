@@ -9,7 +9,7 @@ _Last updated: 2026-11-15_
 2. Grouping recall (I-016): the 18 same-story gold pairs still split, 15 with no link (`logs/gold3.out`); and check the CJP story (issue 8, 1,820 articles) for SIR / election-commission drift (I-001).
 3. A 2-line story summary, checked against the headlines like the titles and dot labels.
 
-**Waiting on the user:** make the repo public (D-039: AGPL-3.0, CLA, SECURITY.md added; confirm the copyright name, enable private vulnerability reporting first); feedback on the front page (http://localhost:5173: categories, simpler cards) and the story page; how strict the title check should be (I-022).
+**Waiting on the user:** the repo is public (D-039); ask GitHub Support to drop the old commits that still show the Gmail address (D-040; check: `curl -s -o /dev/null -w '%{http_code}' https://api.github.com/repos/joybratasarkar/smriti/commits/5978700` should give 404), confirm the copyright name, add repo topics, enable private vulnerability reporting; feedback on the front page (http://localhost:5173: categories, simpler cards) and the story page; how strict the title check should be (I-022).
 
 **MVP (top priority, `[MVP]` in DECISIONS):** story grouping as a connected, traversable graph (D-023); two towers + cross-encoder, LLM only labels and referees (D-024, D-028). Build plan in `docs/WORKFLOW.md` section 5.
 
