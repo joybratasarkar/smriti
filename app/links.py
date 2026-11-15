@@ -6,12 +6,15 @@ Run with:  python -m app.links              (weigh links between stories)
 Weighing: for every story with at least MIN_ARTICLES articles, the towers pick the LINK_K other such
 stories with the closest centroids (cosine >= FLOOR) within WINDOW_DAYS of it in time. The cross-encoder
 reads both stories' latest headlines; its probability is the link weight. Links with weight >= MIN_WEIGHT
-are stored as 'related', from the older story to the newer one. Run it again after app.group.
+are stored as 'related', from the older story to the newer one. Run it again after app.group: only pairs where
+one of the two stories has new latest headlines since the last run are weighed again (issues.links_key), since
+an unchanged pair gets the same weight.
 Naming: the LLM judge labels a link same_story / follow_up / same_actor / same_topic / unrelated and
 gives a one-line reason, stored as evidence. The cut-offs are provisional (D-027).
 """
 
 import argparse
+import hashlib
 import logging
 import time
 from collections import Counter
@@ -34,7 +37,8 @@ STORIES_SQL = """
     SELECT i.id, i.centroid, extract(epoch FROM i.first_seen), extract(epoch FROM i.last_seen),
            ARRAY(SELECT a.title FROM article_issues ai JOIN articles a ON a.id = ai.article_id
                  WHERE ai.issue_id = i.id
-                 ORDER BY coalesce(a.published_at, a.fetched_at) DESC LIMIT %s) AS headlines
+                 ORDER BY coalesce(a.published_at, a.fetched_at) DESC LIMIT %s) AS headlines,
+           i.links_key
     FROM issues i WHERE i.article_count >= %s
     ORDER BY i.first_seen, i.id
 """
@@ -80,9 +84,13 @@ def weigh(conn) -> None:
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
     first, last = np.array([float(r[2]) for r in rows]), np.array([float(r[3]) for r in rows])
     texts = [" | ".join(r[4]) for r in rows]  # latest headline first
+    keys = [hashlib.md5(f"{models.CROSS_ENCODER}\n{t}".encode()).hexdigest() for t in texts]
+    changed = [k != r[5] for k, r in zip(keys, rows)]
 
-    pairs = sorted(candidate_pairs(vectors, first, last))
-    log.info("%d candidate links; weighing them with %s on %s", len(pairs), models.CROSS_ENCODER, models.DEVICE)
+    candidates = candidate_pairs(vectors, first, last)
+    pairs = sorted((i, j) for i, j in candidates if changed[i] or changed[j])
+    log.info("%d candidate links, %d with a changed story (%d of %d stories changed); weighing them with %s on %s",
+             len(candidates), len(pairs), sum(changed), len(rows), models.CROSS_ENCODER, models.DEVICE)
     cross_encoder = models.CrossEncoder()
     started, kept = time.time(), 0
     for start in range(0, len(pairs), 2000):
@@ -98,6 +106,11 @@ def weigh(conn) -> None:
         kept += len(strong)
         log.info("  %d / %d weighed, %d kept, %.0f pairs/s", start + len(chunk), len(pairs), kept,
                  (start + len(chunk)) / (time.time() - started))
+    # Only once all their pairs are weighed: a run that stops halfway weighs these stories again next time.
+    with conn.cursor() as cur:
+        cur.executemany("UPDATE issues SET links_key = %s WHERE id = %s",
+                        [(k, ids[n]) for n, k in enumerate(keys) if changed[n]])
+    conn.commit()
 
 
 def describe(label: str, first_seen, last_seen, count: int) -> str:

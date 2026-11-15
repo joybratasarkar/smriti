@@ -154,3 +154,7 @@ CREATE TABLE IF NOT EXISTS article_categories (
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;   -- predicted by app.categories; NULL until it runs
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS region TEXT;     -- 'India' or 'World'
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS category_by TEXT; -- 'llm' (front-page stories) or 'classifier'
+
+-- app.links: md5 of the cross-encoder name and the latest headlines it last weighed this story by, so a rerun
+-- only weighs pairs where one of the two stories changed (the weight of an unchanged pair is the same).
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS links_key TEXT;

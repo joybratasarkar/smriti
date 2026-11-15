@@ -121,6 +121,7 @@ Indexes: `published_at`, `content_hash`.
 | `first_seen` / `last_seen` | TIMESTAMPTZ | Earliest and latest member article date |
 | `category`, `region` | TEXT | One of the 9 categories and `India` / `World` (D-036, `app/categories.py`); NULL until it runs |
 | `category_by` | TEXT | `llm` (front-page stories) or `classifier` |
+| `links_key` | TEXT | md5 of the cross-encoder name and the latest headlines `app.links` last weighed the story by |
 | `created_at` | TIMESTAMPTZ | |
 
 Index: `last_seen`.
@@ -231,7 +232,7 @@ Teacher-student (D-028):
 
 Full run (2026-10-20): 62,039 candidate pairs weighed in 73 min (14 a second), 10,390 kept. Naming the 500 strongest took 16 min (about 2 s each).
 
-Rerun both after `app.group`. `app.group --reset` deletes all links (new issue IDs).
+Rerun both after `app.group`. A rerun only weighs candidate pairs where at least one story's `links_key` changed (new latest headlines, or another cross-encoder), because an unchanged pair would get the same weight; the keys are written once all pairs are weighed, so a run that stops halfway redoes those stories. `app.group --reset` deletes all links (new issue IDs).
 
 ## 5c. Key moments, the dots on a story's path (`app/moments.py`, D-030)
 
