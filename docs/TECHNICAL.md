@@ -242,7 +242,7 @@ Rerun both after `app.group`. A rerun only weighs candidate pairs where at least
 
 ## 5d. The front page, "Today's stories" (`app/front.py`, D-032)
 
-1. **Rank** (on every `GET /api/front`, about 0.5 s): stories with articles published in the 48 hours before the last fetch, ranked by distinct outlets (sites) in that window, then by reports in it. Stories with fewer than **4** articles are left out.
+1. **Rank** (on every `GET /api/front`, about 0.5 s): stories with articles published in the 48 hours before the last fetch of news that is already in stories (`moments.checked`, I-027; a refresh in progress has fetched newer articles but not grouped them), ranked by distinct outlets (sites) in that window, then by reports in it. Stories with fewer than **4** articles are left out.
 2. **Category and region:** `issues.category` and `issues.region` from `app.categories` (section 5e); the tabs are the 9 categories, with an All / India / World switch. A story not yet labelled shows as Society · India. Tabs with fewer than 3 stories are hidden.
 3. **Left out:** stories where most articles are in a repeating column or paid content (`/astrology/`, `/brandhub/`, `/trending/` in the first 3 path parts, `front.JUNK_SECTIONS`) or have headlines matching `front.JUNK_TITLE` (horoscope, "gold rate today", wishes ...). `#/all` still lists them.
 4. **Card** (D-037): category · region, **New** when the story began inside the window; title from `story_titles`, else the trimmed central headline; "Latest:" = the newest moment's label, else its trimmed headline; outlets and time since the last report; the moments' sizes for the lead card's mini dot-path.

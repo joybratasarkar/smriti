@@ -56,6 +56,12 @@ def rows(conn, sql: str, params=()) -> list[tuple]:
     return conn.cursor(row_factory=tuple_row).execute(sql, params).fetchall()
 
 
+def checked(conn):
+    """When the news the stories cover was fetched: the newest article that is already in a story. While a refresh
+    runs, newer articles are fetched but not grouped yet; "today" and "no reports since" follow the stories."""
+    return rows(conn, "SELECT max(a.fetched_at) FROM articles a JOIN article_issues ai ON ai.article_id = a.id")[0][0]
+
+
 def outlet_names(conn) -> dict[str, str]:
     """Site -> the feed's name for it, so a GDELT row ('hindustantimes.com') reads like an RSS one (I-020)."""
     names = {}

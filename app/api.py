@@ -128,5 +128,5 @@ def get_issue(issue_id: int):
         # The timeline path (D-030): key moments with their headlines, and how recent our news is.
         register_vector(conn)
         issue.update(moments.story_moments(conn, issue_id, names))
-        issue["checked"] = conn.execute("SELECT max(fetched_at) AS t FROM articles").fetchone()["t"]
+        issue["checked"] = moments.checked(conn)
     return issue

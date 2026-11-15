@@ -79,7 +79,9 @@ def junk_section(url: str) -> bool:
 
 def pool(conn) -> tuple:
     """(checked, since, stories): the front-page stories in rank order, junk left out."""
-    checked = moments.rows(conn, "SELECT max(fetched_at) FROM articles")[0][0]
+    checked = moments.checked(conn)
+    if checked is None:  # nothing grouped yet
+        return None, None, []
     since = checked - WINDOW
     found = moments.rows(conn, CANDIDATES_SQL, {"since": since, "min": MIN_REPORTS})
     links: dict[int, list[tuple]] = {}
