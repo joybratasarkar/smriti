@@ -40,7 +40,7 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 | Timeline labels (D-030) | `python -m app.moments --label N` (the N biggest stories) |
 | Front-page titles + summaries (D-032, D-042) | `python -m app.front --titles N`; run after grouping |
 | Categories (D-036) | `python -m app.categories --label N` (LLM labels N articles), then `python -m app.categories` (classifier, all stories) and `--stories` (LLM, front-page stories); run after grouping |
-| Teacher labels (G-4) | `python -m app.teach` (progress), `--sample N`, `--names N` (shared-name pairs), `--label` |
+| Teacher labels (G-4) | `python -m app.teach` (progress), `--sample N`, `--names N` (shared-name pairs), `--opinion N` (editorial / review vs news, D-041), `--label` |
 | Fine-tune (G-5) | `python -m app.train` → `models/ce-same-story/` (needed by `app.group`) |
 | Gold set (G-2) | `python -m app.gold` (progress), `--sample N`, `--label`; `--stories` scores the stories; `--export` / `--import data/gold_pairs.csv` |
 | Compare models (G-3) | `python -m app.compare` (`--methods ...`); per-pair scores in `logs/compare_<date>.jsonl` |

@@ -86,7 +86,7 @@ Run from the project root with the virtualenv active.
 | Fetch news (RSS, last 7 days) | `python -m app.fetch` (`--days N`; `--gdelt` adds GDELT bulk files) |
 | Check stored articles | `python -m app.stats` |
 | Embed new articles | `python -m app.embed` |
-| Teacher labels for training | `python -m app.teach` (progress), `--sample N`, `--names N`, `--label` |
+| Teacher labels for training | `python -m app.teach` (progress), `--sample N`, `--names N`, `--opinion N`, `--label` |
 | Fine-tune the cross-encoder | `python -m app.train` → `models/ce-same-story/` |
 | Group into stories | `python -m app.group` (`--reset` regroups everything) |
 | Story links | `python -m app.links` (`--types N`: the LLM names the N strongest) |

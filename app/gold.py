@@ -16,6 +16,8 @@ Pairs come in four equal strata, so the set holds both easy and hard cases:
 A fifth stratum is only used for training pairs (app/teach.py --names):
   name    cosine 0.4-0.95 and sharing a rare capitalised title word ("Shroff", "Mundhe"): often the same person
           in two different events, which the cross-encoder took for one story (I-023)
+  opinion an editorial, opinion piece, explainer, review or feature and its most similar news article from within
+          3 days (cosine 0.4-0.95): the student splits these from the news they are about (I-016, D-041)
 The two articles are at most 30 days apart. Cosine is the bge-m3 embedding from app.embed
 (random same-day pairs: median 0.31, 95% below 0.44; CJP protest pairs: median 0.44).
 """
@@ -25,6 +27,7 @@ import csv
 import random
 import re
 import textwrap
+from urllib.parse import urlparse
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -73,8 +76,14 @@ RARE_SHARE = 0.005                           # a rare word is in at most 0.5% of
 NEAREST_DAYS = 3
 MAX_TRIES = 2000                             # per pair, before giving up on a stratum
 
+# Opinion, editorials, explainers, reviews and features, by headline or link section (the "opinion" stratum).
+OPINION_TITLE = re.compile(r"(^|\W)(editorial|opinion|op-ed|quick edit|explained|explainer|analysis|review|"
+                           r"editor's pick|column)(\W|$)", re.I)
+OPINION_SECTIONS = {"opinion", "editorial", "editorials", "columns", "blogs", "analysis", "explained", "explainers",
+                    "reviews", "review", "features", "commentisfree", "comment", "long-reads", "in-depth"}
+
 LOAD_SQL = """
-    SELECT a.id, extract(epoch FROM a.published_at), a.title, e.embedding
+    SELECT a.id, extract(epoch FROM a.published_at), a.title, e.embedding, a.url
     FROM articles a JOIN article_embeddings e ON e.article_id = a.id
     WHERE a.published_at IS NOT NULL
 """
@@ -144,6 +153,23 @@ def name_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, names:
     return None
 
 
+def opinion_pair(rng: random.Random, vectors: np.ndarray, times: np.ndarray, opinion: np.ndarray):
+    """An opinion-like article and its most similar news article within NEAREST_DAYS. (i, j, cosine) or None."""
+    rows = np.flatnonzero(opinion)
+    for _ in range(MAX_TRIES if len(rows) else 0):
+        i = int(rng.choice(rows))
+        sims = vectors @ vectors[i]
+        sims[(np.abs(times - times[i]) > NEAREST_DAYS * 86400) | (sims >= NEAR_DUPLICATE) | opinion] = -1
+        j = int(np.argmax(sims))
+        if sims[j] >= LOW:
+            return i, j, float(sims[j])
+    return None
+
+
+def is_opinion(title: str, url: str) -> bool:
+    return bool(OPINION_TITLE.search(title)) or bool(OPINION_SECTIONS & set(urlparse(url).path.lower().split("/")))
+
+
 def rare_words(titles: list[str], capitalised: bool = False) -> dict[str, list[int]]:
     """Word -> rows whose title has it, for words in 2 to RARE_SHARE of all titles.
     With `capitalised`, only words written with a capital letter (mostly names; Title Case headlines add a few others)."""
@@ -167,6 +193,7 @@ def sample(conn, sizes: dict[str, int], table: str = "gold_pairs", other: str = 
     vectors = np.vstack([r[3].to_numpy() for r in rows])  # L2-normalized, so dot product = cosine
     rare = rare_words([r[2] for r in rows])
     names = rare_words([r[2] for r in rows], capitalised=True)
+    opinion = np.array([is_opinion(r[2], r[4]) for r in rows])
     print(f"{len(rows)} embedded articles, {len(rare)} rare words")
 
     rng = random.Random()
@@ -176,6 +203,7 @@ def sample(conn, sizes: dict[str, int], table: str = "gold_pairs", other: str = 
         "middle": lambda: band_pair(rng, vectors, times, LOW, HIGH),
         "low": lambda: rare_word_pair(rng, vectors, times, rare),
         "name": lambda: name_pair(rng, vectors, times, names),
+        "opinion": lambda: opinion_pair(rng, vectors, times, opinion),
     }
     insert = INSERT_SQL.format(table=table, other=other)
     for stratum, size in sizes.items():
