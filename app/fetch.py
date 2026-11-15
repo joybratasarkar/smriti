@@ -158,6 +158,11 @@ def save(conn, articles: list[dict]) -> int:
     inserted = 0
     with conn.cursor() as cur:
         for article in articles:
+            # Only web links: the frontend makes the URL a clickable link, and a feed could send
+            # a javascript: or data: URL that would run in the page (I-026).
+            if urlsplit(article["url"]).scheme not in ("http", "https"):
+                log.warning("Skipped a non-web link from %s: %.80s", article["source_name"], article["url"])
+                continue
             cur.execute(INSERT_SQL, article)
             inserted += cur.rowcount
     conn.commit()

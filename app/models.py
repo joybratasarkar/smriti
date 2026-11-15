@@ -28,12 +28,25 @@ def article_text(title: str, snippet: str | None) -> str:
     return f"{title}. {snippet}" if snippet else title
 
 
+# Models that run their own code from the Hugging Face repo, pinned to the commit we checked,
+# so a later change to that repo can't run new code here (I-026).
+PINNED_REMOTE_CODE = {
+    "nvidia/llama-nemotron-embed-1b-v2": "113abe4acafa848e77ead9c0623205e511932348",
+    "nvidia/llama-nemotron-rerank-1b-v2": "828765652b05bd439c9789d2a6d093db1caa1443",
+}
+
+
 def load(model_class, name: str, trust: bool, dtype: torch.dtype):
     """Tokenizer and model. `trust` runs the model repo's own code (the NVIDIA models need it)."""
-    tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=trust)
+    revision = None
+    if trust:
+        if name not in PINNED_REMOTE_CODE:
+            raise ValueError(f"{name} runs remote code: add it to PINNED_REMOTE_CODE with a checked commit")
+        revision = PINNED_REMOTE_CODE[name]
+    tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=trust, revision=revision)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = model_class.from_pretrained(name, dtype=dtype, trust_remote_code=trust)
+    model = model_class.from_pretrained(name, dtype=dtype, trust_remote_code=trust, revision=revision)
     return tokenizer, model.to(DEVICE).eval()
 
 
