@@ -8,11 +8,12 @@ Accuracy rules: every event must be traceable to a source article, and we store 
 
 | Part | State |
 |---|---|
-| Ingest: RSS from 15 Indian and world outlets into Postgres | Done |
-| Group: embeddings + similarity clustering into issues | Done (gives event-level clusters; being replaced) |
-| Web app: issue list and per-issue timeline | Done (read-only) |
+| Ingest: RSS from Indian and world outlets (plus optional GDELT) into Postgres | Done |
+| Group: bge-m3 embeddings find candidates, a fine-tuned cross-encoder decides "same story?" | Done (MVP) |
+| Story links: related stories connected as a graph, link types named by the LLM | Done |
+| Web app: "Today's stories" front page with categories, story page with a timeline | Done (read-only) |
 | Understand: local LLM extracts events (who, what, when, where, quote) | Testing |
-| Remember: issues → events → people/orgs as Postgres tables, LLM-judged merges | Designed |
+| Automatic twice-daily fetch | Planned |
 
 Where things stand:
 
@@ -27,9 +28,11 @@ Where things stand:
 ## Stack
 
 - Python, FastAPI, psycopg 3
-- PostgreSQL 16 with pgvector (everything, including the graph, is plain tables)
-- fastembed (`paraphrase-multilingual-MiniLM-L12-v2`) for embeddings
-- Ollama with Qwen3-4B-Instruct-2507 for extraction (runs on a 4 GB GPU)
+- PostgreSQL 16 with pgvector (everything, including the story graph, is plain tables)
+- PyTorch + Hugging Face transformers on a small GPU (4 GB is enough):
+  - `BAAI/bge-m3` embeddings (1024-dim) to find candidate articles
+  - `BAAI/bge-reranker-v2-m3` cross-encoder, fine-tuned on the local LLM's labels (`python -m app.train`), to decide which articles are the same story
+- Ollama with Qwen3-4B-Instruct-2507 as the teacher and referee: labels training pairs, names story links, writes front-page titles and timeline labels, sorts categories
 - Svelte 5 + Vite for the frontend
 
 ## Setup
@@ -48,7 +51,7 @@ Where things stand:
 3. **Config.** Copy `.env.example` to `.env` and set `DATABASE_URL`. `.env` is git-ignored.
 4. **Schema.** `python -m app.db` (every script also applies it on start).
 5. **Frontend.** `cd frontend && npm install`
-6. **LLM (only for the extraction test).** Install Ollama and `ollama pull qwen3:4b-instruct-2507-q4_K_M`.
+6. **LLM (labels, titles, categories, extraction test).** Install Ollama and `ollama pull qwen3:4b-instruct-2507-q4_K_M`.
 
 ## Usage
 
@@ -65,7 +68,7 @@ Run from the project root with the virtualenv active.
 | API | `uvicorn app.api:app --reload --port 8010` |
 | Frontend | `cd frontend && npm run dev`, then open http://localhost:5173 |
 
-To refresh the data, run fetch → embed → group in that order. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
+To refresh the data, run fetch → embed → group → categories → links → front titles in that order (the full list of commands is in [`PROGRESS.md`](PROGRESS.md)). `app.group` needs the fine-tuned model in `models/ce-same-story/`, built from teacher labels (`python -m app.teach --sample N`, then `--label`) and `python -m app.train`. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
 
 ## Layout
 
@@ -77,3 +80,15 @@ feeds.txt     RSS sources
 docs/         issues, decisions, diagrams, technical notes
 logs/         run logs (git-ignored)
 ```
+
+## Data and copyright
+
+Smriti stores links and metadata only: title, URL, source, dates, language, a short snippet and a content hash. Full article text is never stored. The LLM test (`app/llm_test.py`) downloads an article's text, passes it to the model and discards it. The article archive (the database) is not part of this repository and must not be published. News content belongs to its publishers. If you run a public instance, check each feed's terms of use, as many allow only personal, non-commercial use.
+
+## License
+
+Copyright (C) 2026 Joybrata Sarkar.
+
+Smriti is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You may use, change and share it. If you run a modified version as a network service, you must offer its source code to that service's users. For other licensing terms, including commercial use without AGPL obligations, contact the copyright holder through GitHub.
+
+Contributions are welcome under the [Contributor License Agreement](CONTRIBUTING.md). Security: see [SECURITY.md](SECURITY.md).
