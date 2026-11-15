@@ -38,7 +38,7 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 | Group into stories | `python -m app.group` (`--reset`); cut-offs in `app/group.py` |
 | Story links | `python -m app.links`; `--types N` has the LLM name the N strongest |
 | Timeline labels (D-030) | `python -m app.moments --label N` (the N biggest stories) |
-| Front-page titles (D-032) | `python -m app.front --titles N`; run after grouping |
+| Front-page titles + summaries (D-032, D-042) | `python -m app.front --titles N`; run after grouping |
 | Categories (D-036) | `python -m app.categories --label N` (LLM labels N articles), then `python -m app.categories` (classifier, all stories) and `--stories` (LLM, front-page stories); run after grouping |
 | Teacher labels (G-4) | `python -m app.teach` (progress), `--sample N`, `--names N` (shared-name pairs), `--label` |
 | Fine-tune (G-5) | `python -m app.train` → `models/ce-same-story/` (needed by `app.group`) |

@@ -1,10 +1,15 @@
 <script>
   import { plural, timeAgo } from './lib/format.js'
+  import { after } from './lib/visits.js'
 
   // One front-page story (D-032, simplified by D-037): category · region, title, the latest moment, outlets and time.
   // Only the lead card draws the mini dot-path (dot size is how much was reported, ending at a pulsing "now").
-  // The whole card opens the story page.
-  let { story, lead = false } = $props()
+  // The whole card opens the story page. `seen` is the news check of the reader's last visit (D-042): stories that
+  // began or got reports after it are tagged; on a first visit, "New" means it began in the last 48 hours.
+  let { story, lead = false, seen = null } = $props()
+
+  let tag = $derived(seen ? (after(story.first_seen, seen) ? 'New' : after(story.last_seen, seen) ? 'Updated' : '')
+                          : (story.new ? 'New' : ''))
 
   let biggest = $derived(Math.max(...story.dots))
   const size = (n) => 7 + 16 * Math.sqrt(n / biggest)
@@ -13,9 +18,10 @@
 <a href="#/issues/{story.id}" class="fcard" class:lead>
   <div class="ftag">
     <span>{story.category} · {story.region}</span>
-    {#if story.new}<span class="new">New</span>{/if}
+    {#if tag}<span class="new">{tag}{seen ? ' since your last visit' : ''}</span>{/if}
   </div>
   <h2>{story.title}</h2>
+  {#if lead && story.summary}<p class="summary">{story.summary}</p>{/if}
   {#if lead}
     <div class="minipath" aria-hidden="true">
       {#each story.dots as n, i (i)}

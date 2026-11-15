@@ -1,6 +1,7 @@
 <script>
   import StoryCard from './StoryCard.svelte'
-  import { getJSON } from './lib/format.js'
+  import { getJSON, formatDateTime } from './lib/format.js'
+  import { frontSeen } from './lib/visits.js'
 
   // "Today's stories" (D-032): one lead story, then 12 cards at a time, most outlets first.
   // `topic` is a category tab (D-036) or 'Top'; `region` is 'All', 'India' or 'World'.
@@ -13,6 +14,7 @@
   let total = $state(0)
   let loading = $state(true)
   let error = $state('')
+  let seen = $state(null)    // the news check of the reader's last visit (D-042)
 
   async function load() {
     loading = true
@@ -21,6 +23,7 @@
     const params = new URLSearchParams({ topic, region, offset, limit: offset ? PAGE : FIRST })
     try {
       const data = await getJSON(`/api/front?${params}`)
+      if (!offset) seen = frontSeen(data.checked)
       stories = [...stories, ...data.stories]
       total = data.total
     } catch (e) {
@@ -35,6 +38,7 @@
 <div class="front-head">
   <h1 class="page-title">{topic === 'Top' ? "Today's stories" : topic}</h1>
   <p>Most reported in the 48 hours before the last check, by number of outlets</p>
+  {#if seen}<p class="since">Marked: new or updated since your last visit (news up to {formatDateTime(seen)})</p>{/if}
   <nav class="regions" aria-label="Region">
     {#each REGIONS as r (r)}
       <a href={r === 'All' ? (topic === 'Top' ? '#/' : `#/topic/${encodeURIComponent(topic)}`)
@@ -49,10 +53,10 @@
 {/if}
 
 {#if stories.length}
-  <StoryCard story={stories[0]} lead />
+  <StoryCard story={stories[0]} lead {seen} />
   <div class="fgrid">
     {#each stories.slice(1) as story (story.id)}
-      <StoryCard {story} />
+      <StoryCard {story} {seen} />
     {/each}
   </div>
 {/if}

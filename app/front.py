@@ -1,6 +1,6 @@
 """The front page, "Today's stories" (D-032).
 
-Run with:  python -m app.front --titles 60   (the LLM writes clean titles for the 60 top front-page stories)
+Run with:  python -m app.front --titles 60   (the LLM writes clean titles and summaries for the 60 top stories)
 
 The front page shows the stories most reported in the 48 hours before the last fetch, ranked by how many different
 outlets reported them, then by reports. Stories with fewer than MIN_REPORTS reports and repeating columns (horoscopes,
@@ -11,6 +11,10 @@ A title is 5 to 9 plain words written by the LLM from the story's main headlines
 labels (every name and number must be in the headlines, and the LLM referee must find that the headlines back
 it, I-022), else the trimmed central headline. Titles are keyed by the story's newest moment, so a story gets a
 new title only when it gets a new newest dot.
+
+A summary is 2 short sentences (D-042): what the story is about, then the latest. It is written from the story's
+main headlines and its newest dot's headlines, and each sentence gets the title's two checks; a summary that fails
+is not shown. Keyed like the titles.
 """
 
 import argparse
@@ -42,6 +46,15 @@ SYSTEM = ("You write headlines for a news front page read by people of every age
           "news story, write ONE plain English title of 5 to 9 words saying what the story is about. Use only facts "
           "in the headlines. Keep names exactly as written. No quotes, no opinion, no outlet names, no 'live'.")
 SCHEMA = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+
+SUMMARY_SYSTEM = ("You write a short summary for a news front page read by people of every age. Given the main "
+                  "headlines of one news story and its newest headlines, write exactly 2 short plain English "
+                  "sentences: first what the story is about, then the latest development. At most 40 words in all. "
+                  "Use only facts in the headlines; when one gives what someone said, say who said it. Keep names exactly as "
+                  "written. No opinion, no outlet names, no 'live'.")
+SUMMARY_SCHEMA = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+SUMMARY_WORDS = 45
+NEWEST_HEADLINES = 3
 
 CANDIDATES_SQL = """
     WITH recent AS (
@@ -91,7 +104,9 @@ def card(conn, story: dict, names: dict[str, str], since) -> dict:
     title = moments.rows(conn, "SELECT title FROM story_titles WHERE moment_key = %s", (keys[-1],))
     newest = moments.headlines(groups[-1])
     label = moments.rows(conn, "SELECT label FROM moment_labels WHERE moment_key = %s", (keys[-1],))
+    summary = moments.rows(conn, "SELECT summary FROM story_summaries WHERE moment_key = %s", (keys[-1],))
     return {**story,
+            "summary": summary[0][0] if summary else None,
             "title": title[0][0] if title else moments.trim(moments.headlines(articles)[0]["title"]),
             "title_ai": bool(title),
             "new": story["first_seen"] >= since,
@@ -110,8 +125,34 @@ def front(conn, names: dict[str, str], topic: str, region: str, offset: int, lim
             "stories": [card(conn, s, names, since) for s in chosen[offset:offset + limit]]}
 
 
+def write_summary(conn, client: httpx.Client, articles: list[dict], groups: list[list[dict]]) -> str:
+    """The story's 2-sentence summary unless it has one: 'kept', 'written' or 'fallback' (failed the check)."""
+    key = moments.key_of(groups[-1])
+    if conn.execute("SELECT 1 FROM story_summaries WHERE moment_key = %s", (key,)).fetchone():
+        return "kept"
+    main = [h["title"] for h in moments.headlines(articles)[:MAIN_HEADLINES]]
+    newest = [h["title"] for h in moments.headlines(groups[-1])[:NEWEST_HEADLINES] if h["title"] not in main]
+    prompt = ("Main headlines:\n" + "\n".join(f"- {t}" for t in main) +
+              "\nNewest headlines:\n" + "\n".join(f"- {t}" for t in newest or main[:1]))
+    out, _ = ollama.chat(client, ollama.MODEL, SUMMARY_SYSTEM, prompt, SUMMARY_SCHEMA, 2048)
+    try:
+        summary = " ".join(json.loads(out).get("summary", "").split())
+    except (json.JSONDecodeError, AttributeError):
+        return "fallback"
+    heads = main + newest
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", summary) if s]
+    if not (1 <= len(sentences) <= 2 and len(summary.split()) <= SUMMARY_WORDS
+            and all(moments.grounded(s, heads) and moments.supported(client, s.rstrip("."), heads) for s in sentences)):
+        log.info("  summary failed the check: %s", summary)
+        return "fallback"
+    conn.execute("INSERT INTO story_summaries (moment_key, summary, model) VALUES (%s, %s, %s) "
+                 "ON CONFLICT (moment_key) DO NOTHING", (key, summary, ollama.MODEL))
+    conn.commit()
+    return "written"
+
+
 def write_titles(conn, limit: int) -> None:
-    """Titles, and the newest dot's label, for the top `limit` front-page stories that need them."""
+    """Titles, summaries and the newest dot's label for the top `limit` front-page stories that need them."""
     names = moments.outlet_names(conn)
     stories = pool(conn)[2][:limit]
     log.info("Writing titles for the top %d front-page stories with %s", len(stories), ollama.MODEL)
@@ -120,6 +161,7 @@ def write_titles(conn, limit: int) -> None:
         for s in stories:
             articles, groups = moments.compute(conn, s["id"], names)
             done["label " + moments.label_moment(conn, client, s["id"], groups[-1])] += 1
+            done["summary " + write_summary(conn, client, articles, groups)] += 1
             key = moments.key_of(groups[-1])
             if conn.execute("SELECT 1 FROM story_titles WHERE moment_key = %s", (key,)).fetchone():
                 done["title kept"] += 1
@@ -145,7 +187,8 @@ def write_titles(conn, limit: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--titles", type=int, metavar="N", required=True, help="write titles for the N top stories")
+    parser.add_argument("--titles", type=int, metavar="N", required=True,
+                        help="write titles and summaries for the N top stories")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)

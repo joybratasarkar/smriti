@@ -258,3 +258,12 @@ main { padding-block: 16px 64px; }
 }
 .all-link { margin-top: 28px; }
 .all-link a { color: var(--accent); }
+
+/* D-042: summary, "since your last visit" marks, source strength */
+.summary { margin: 8px 0 0; font-size: 1rem; line-height: 1.45; max-width: 62ch; }
+.fcard.lead .summary { font-size: 1.02rem; }
+.since { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
+.src .new { color: var(--accent); font-weight: 700; }
+.stop .dot.fresh { box-shadow: 0 0 0 4px var(--bg), 0 0 0 7px var(--active); }
+.fresh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--active); vertical-align: -1px; }
+.single { margin: 6px 0 0; font-size: 0.88rem; color: var(--quiet); background: var(--quiet-soft); padding: 6px 10px; border-radius: 6px; }

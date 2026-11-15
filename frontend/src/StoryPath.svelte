@@ -3,8 +3,10 @@
   // The last stop is "now". Linked stories hang off the moment they connect to as small side dots.
   import { tick } from 'svelte'
   import { formatDay, formatRange, plural } from './lib/format.js'
+  import { after } from './lib/visits.js'
 
-  let { moments, latest, links = [], open = $bindable() } = $props()
+  // `seen`: the news check of the reader's last visit; dots with reports after it get a ring (D-042).
+  let { moments, latest, links = [], seen = null, open = $bindable() } = $props()
 
   const LINK_NAMES = {
     same_story: 'same event',
@@ -96,11 +98,12 @@
         <button
           type="button"
           class="dot"
+          class:fresh={after(m.last, seen)}
           data-i={i}
           style:width="{size(m.count)}px"
           style:height="{size(m.count)}px"
           aria-expanded={open === i}
-          aria-label="{formatRange(m.start, m.end)}: {m.label}, {plural(m.count, 'report')}"
+          aria-label="{formatRange(m.start, m.end)}: {m.label}, {plural(m.count, 'report')} from {plural(m.outlets, 'outlet')}{after(m.last, seen) ? ', new since your last visit' : ''}"
           onclick={() => (open = i)}
           onkeydown={(e) => step(e, i)}
         ><span class="n">{m.count}</span></button>

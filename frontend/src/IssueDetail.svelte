@@ -1,6 +1,7 @@
 <script>
   import { getJSON, formatDate, formatDay, formatTime, formatDateTime, formatRange, dayKey, isQuiet, plural } from './lib/format.js'
   import StoryPath from './StoryPath.svelte'
+  import { storySeen, after } from './lib/visits.js'
 
   let { id } = $props()
 
@@ -9,12 +10,14 @@
   let open = $state(0)           // which dot is open; moments.length is "now"
   let allHeadlines = $state(false)
   let copies = $state({})        // headline title -> its copies are shown
+  let seen = $state(null)        // the news check of the reader's last visit to this story (D-042)
 
   $effect(() => {
     issue = null
     error = ''
     getJSON(`/api/issues/${id}`)
       .then((data) => {
+        seen = storySeen(id, data.checked)
         issue = data
         open = data.moments.length  // start at "now": where the story stands
       })
@@ -66,6 +69,7 @@
 {:else}
   <section class="issue-head">
     <h1>{issue.label}</h1>
+    {#if issue.summary}<p class="summary">{issue.summary}</p>{/if}
     <p class="story-meta">
       {plural(issue.article_count, 'report')} ·
       {formatDay(issue.first_seen)}{#if formatDay(issue.first_seen) !== formatDay(issue.last_seen)}{' – '}{formatDay(issue.last_seen)}{/if} ·
@@ -79,16 +83,23 @@
   </section>
 
   {#if issue.mode === 'path'}
-    <StoryPath moments={issue.moments} {latest} links={issue.links} bind:open />
+    {#if seen && issue.moments.some((m) => after(m.last, seen))}
+      <p class="since">Dots marked <span class="fresh-dot" aria-hidden="true"></span> have reports since your last visit.</p>
+    {/if}
+    <StoryPath moments={issue.moments} {latest} links={issue.links} {seen} bind:open />
 
     <section class="moment" aria-live="polite">
       {#if moment}
-        <h2>{moment.label} <small>{formatRange(moment.start, moment.end)} · {plural(moment.count, 'report')}</small></h2>
+        <h2>{moment.label} <small>{formatRange(moment.start, moment.end)} · {plural(moment.count, 'report')} · {plural(moment.outlets, 'outlet')}</small></h2>
+        {#if moment.outlets === 1}
+          <p class="single">Only one outlet has reported this so far.</p>
+        {/if}
         <ul class="heads">
           {#each allHeadlines ? moment.heads : moment.heads.slice(0, FIRST_HEADLINES) as head (head.title)}
             <li>
               <a href={head.outlets[0].url} target="_blank" rel="noopener noreferrer">{head.title}</a>
               <p class="src">
+                {#if after(head.time, seen)}<span class="new">New since your last visit</span>{/if}
                 <span>{head.outlets[0].name} · {formatDay(head.time)}, {formatTime(head.time)}</span>
                 {#if head.outlets.length > 1}
                   {#if copies[head.title]}
@@ -122,8 +133,8 @@
       {/if}
     </section>
 
-    {#if anyLabelled}
-      <p class="muted small">The short labels on the dots are written by AI from each moment's headlines and checked against them. The headlines are the reports themselves.</p>
+    {#if anyLabelled || issue.summary}
+      <p class="muted small">The summary and the short labels on the dots are written by AI from the headlines and checked against them. The headlines are the reports themselves.</p>
     {/if}
   {:else if issue.links.length}
     <section class="links">

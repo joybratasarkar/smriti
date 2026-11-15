@@ -173,6 +173,10 @@ Same columns as `gold_pairs` plus `labeled_by` (the LLM); labels without `unsure
 
 `moment_key` (md5 of the story's **newest** moment's sorted article ids, primary key), `title` (5 to 9 words), `model`, `created_at`. A story gets a new title only when it gets a new newest dot. No foreign key to `issues` on purpose: `app.group --reset` truncates `issues` (D-033).
 
+### `story_summaries`: 2-sentence summaries for front-page stories (D-042, `app/front.py`)
+
+`moment_key` (md5 of the story's newest moment's sorted article ids, primary key), `summary`, `model`, `created_at`. Keyed and kept like `story_titles`.
+
 ### `article_categories`: LLM category labels for sampled articles (D-036, `app/categories.py`)
 
 `article_id` (PK → `articles(id)` ON DELETE CASCADE), `category`, `region` (`India` / `World`), `model`, `created_at`. Keyed by article, so the labels survive a regroup; they train the story classifier.
@@ -241,7 +245,8 @@ Rerun both after `app.group`. `app.group --reset` deletes all links (new issue I
 2. **Category and region:** `issues.category` and `issues.region` from `app.categories` (section 5e); the tabs are the 9 categories, with an All / India / World switch. A story not yet labelled shows as Society · India. Tabs with fewer than 3 stories are hidden.
 3. **Left out:** stories where most articles are in a repeating column or paid content (`/astrology/`, `/brandhub/`, `/trending/` in the first 3 path parts, `front.JUNK_SECTIONS`) or have headlines matching `front.JUNK_TITLE` (horoscope, "gold rate today", wishes ...). `#/all` still lists them.
 4. **Card** (D-037): category · region, **New** when the story began inside the window; title from `story_titles`, else the trimmed central headline; "Latest:" = the newest moment's label, else its trimmed headline; outlets and time since the last report; the moments' sizes for the lead card's mini dot-path.
-5. **Titles** (`python -m app.front --titles N`, the N top stories): the LLM writes 5 to 9 words from the story's 6 most central headlines, with the dot labels' two checks (section 5c), and labels the newest moment if it has no label. First run 2026-10-25: 54 of 60 titles passed, one of those was false and was deleted (I-022); the referee's recheck on 2026-10-26 removed 4 of 53.
+5. **Titles and summaries** (`python -m app.front --titles N`, the N top stories): the LLM writes 5 to 9 words from the story's 6 most central headlines, with the dot labels' two checks (section 5c), and labels the newest moment if it has no label. First run 2026-10-25: 54 of 60 titles passed, one of those was false and was deleted (I-022); the referee's recheck on 2026-10-26 removed 4 of 53.
+6. **Summary** (D-042, same run): 2 short sentences, what the story is about and then the latest, from the 6 main headlines and the newest dot's 3 headlines, at most 45 words. Each sentence must pass `moments.grounded` (names and numbers in the headlines) and the referee, or no summary is stored and none is shown. Shown on the lead card and the story page. First try (2026-11-15, 5 big stories): all 5 passed; each claim checked was in the story's headlines.
 
 ## 5e. News categories (`app/categories.py`, D-036)
 
@@ -258,10 +263,10 @@ The API is FastAPI, read-only, and returns JSON. Run it with `uvicorn app.api:ap
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/front` | The front page (section 5d). Params: `topic` = `Top` or a category; `region` = `All`, `India` or `World`; `limit` (0–50, default 13; 0 returns only the tabs and `checked`, for the top bar); `offset`. Returns `{checked, since, tabs[{name, count}], total, stories[]}`, each story with `id, category, region, outlets, recent, reports, first_seen, last_seen, title, title_ai, new, latest, latest_ai, dots[]` (article count per moment) |
+| `GET /api/front` | The front page (section 5d). Params: `topic` = `Top` or a category; `region` = `All`, `India` or `World`; `limit` (0–50, default 13; 0 returns only the tabs and `checked`, for the top bar); `offset`. Returns `{checked, since, tabs[{name, count}], total, stories[]}`, each story with `id, category, region, outlets, recent, reports, first_seen, last_seen, title, title_ai, summary, new, latest, latest_ai, dots[]` (article count per moment) |
 | `GET /api/summary` | Header stats: article, issue and multi-article issue counts, source count (news sites), oldest and newest publish date, last fetch time |
 | `GET /api/issues` | Issue list. Params: `sort` = `recent` (by `last_seen`) or `biggest` (by `article_count`); `min_size` (default 2, hides single-article issues); `q` (case-insensitive search over **member article titles**); `limit` (1–200, default 50); `offset`. Returns `{total, issues[]}`, where each issue has `id, label, article_count, first_seen, last_seen, source_count, sources[]` |
-| `GET /api/issues/{id}` | One issue plus all its articles (`id, title, url, snippet, source_name, language, published_at, similarity, probability`), ordered oldest first; `links`: up to 20 connected stories (`id, label, article_count, first_seen, last_seen, link_type, weight, evidence`), strongest first, `unrelated` hidden; `mode` (`path` or `list`) and `moments` (`start, end, count, label, labelled, heads[{title, time, outlets[{name, url}]}], more`, section 5c); `checked`: the last fetch time. Returns 404 if the issue is missing |
+| `GET /api/issues/{id}` | One issue plus all its articles (`id, title, url, snippet, source_name, language, published_at, similarity, probability`), ordered oldest first; `links`: up to 20 connected stories (`id, label, article_count, first_seen, last_seen, link_type, weight, evidence`), strongest first, `unrelated` hidden; `mode` (`path` or `list`) and `moments` (`start, end, last` (the newest report's time), `count, outlets` (distinct outlets), `label, labelled, heads[{title, time, outlets[{name, url}]}], more`, section 5c); `summary` (section 5d, or null); `checked`: the last fetch time. Returns 404 if the issue is missing |
 
 `published_at` in the detail endpoint falls back to `fetched_at` when the feed gave no date. Source names are shown one per site (I-020): a GDELT row, whose `source_name` is its site, gets the feed's name for that site (`moments.outlet_names`, read once per server start).
 
@@ -277,7 +282,7 @@ A minimal hash router: `#/` is the front page, `#/topic/Sports` one category tab
 
 ### Front page (`FrontPage.svelte`, `StoryCard.svelte`)
 
-An All / India / World switch, one lead card (bigger title and the mini dot-path), then a grid of 12 cards (3 columns, 2 under 900 px, 1 under 600 px) and "Show 12 more". Cards follow D-037 (section 5d). The mini dot-path has no labels: dots evenly spaced, size by the moment's share, the newest in the accent colour, then a pulsing green "now". The whole card links to the story page.
+An All / India / World switch, one lead card (bigger title and the mini dot-path), then a grid of 12 cards (3 columns, 2 under 900 px, 1 under 600 px) and "Show 12 more". Cards follow D-037 (section 5d). The lead card also shows the story's summary. "Since your last visit" (D-042, `lib/visits.js`): the browser keeps the news check time (`checked`) the reader last saw, for the front page and per story, in `localStorage` (nothing is sent to the server; blocked storage means nothing is marked). Cards are tagged **New** or **Updated since your last visit**; on a first visit **New** means the story began in the 48-hour window. The mini dot-path has no labels: dots evenly spaced, size by the moment's share, the newest in the accent colour, then a pulsing green "now". The whole card links to the story page.
 
 ### Issue list, "All stories" (`IssueList.svelte`)
 
@@ -286,6 +291,8 @@ An All / India / World switch, one lead card (bigger title and the mini dot-path
 - Each card shows the label, article count, source count, date range, sources, and an **active / quiet** badge ("active · latest 20 Oct", "quiet since 9 Sept").
 
 ### The story page: a path of key moments (`IssueDetail.svelte`, `StoryPath.svelte`, D-030)
+
+Under the title, the AI summary when there is one (D-042). Dots with reports after the reader's last visit to this story get a green ring and their new headlines a "New since your last visit" tag. Each open moment shows its outlet count, and "Only one outlet has reported this so far" when only one has (source strength, D-042).
 
 1. Fetch `/api/issues/{id}`; the API has already cut the story into moments (section 5c).
 2. **The path** (`StoryPath.svelte`): one dot per moment, sized by its reports, with its date range, label and report count, on a road drawn through the dot centres after layout (an SVG behind the HTML, redrawn by a `ResizeObserver`). Left to right with a wave when the box is 640 px or wider, winding downward when narrower. The last stop is **NOW** (the latest report, pulsing unless reduced motion is set). Linked stories (the 6 strongest) are purple side dots under the moment closest to their first report, named in plain words ("same event", "similar news") and opening that story's page. Arrow keys move between dots.

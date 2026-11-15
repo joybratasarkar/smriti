@@ -91,7 +91,7 @@ Run from the project root with the virtualenv active.
 | Group into stories | `python -m app.group` (`--reset` regroups everything) |
 | Story links | `python -m app.links` (`--types N`: the LLM names the N strongest) |
 | Categories | `python -m app.categories --label N`, then `python -m app.categories`, then `--stories` |
-| Front-page titles | `python -m app.front --titles N` |
+| Front-page titles and summaries | `python -m app.front --titles N` |
 | Timeline labels | `python -m app.moments --label N` |
 | Gold set, model comparison | `python -m app.gold` (`--sample N`, `--label`), `python -m app.compare` |
 | Score the stories on the gold set | `python -m app.gold --stories` |

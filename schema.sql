@@ -134,6 +134,14 @@ CREATE TABLE IF NOT EXISTS story_titles (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- D-042: a 2-sentence summary per front-page story (what it is about, then the latest), keyed like story_titles.
+CREATE TABLE IF NOT EXISTS story_summaries (
+    moment_key  TEXT PRIMARY KEY,           -- md5 of the newest moment's sorted article ids
+    summary     TEXT NOT NULL,              -- each sentence checked against the headlines it was written from
+    model       TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- D-036: news categories. The LLM labels a sample of articles (keyed by article, so labels survive a regroup);
 -- app.categories fits a small classifier on their bge-m3 vectors and writes every story's category and region.
 CREATE TABLE IF NOT EXISTS article_categories (

@@ -111,13 +111,15 @@ def trim(title: str) -> str:
 
 def safe(label: str, titles: list[str]) -> bool:
     """4 to 7 words (a little slack), and every capitalised word or number is in the headlines."""
-    words = label.split()
-    if not 3 <= len(words) <= 9:
-        return False
-    text = re.sub(r"(?<=\d),(?=\d)", "", " ".join(titles).lower())
-    for w in words:
+    return 3 <= len(label.split()) <= 9 and grounded(label, titles)
+
+
+def grounded(text: str, titles: list[str]) -> bool:
+    """Every capitalised word and number of `text` appears in the headlines (commas in numbers ignored)."""
+    heads = re.sub(r"(?<=\d),(?=\d)", "", " ".join(titles).lower())
+    for w in text.split():
         w = re.sub(r"[^\w'-]", "", w.replace(",", "")).strip("'")
-        if w and (any(c.isupper() for c in w) or any(c.isdigit() for c in w)) and w.lower() not in text:
+        if w and (any(c.isupper() for c in w) or any(c.isdigit() for c in w)) and w.lower() not in heads:
             return False
     return True
 
@@ -171,10 +173,13 @@ def story_moments(conn, issue_id: int, names: dict[str, str]) -> dict:
     moments = []
     for g, k in zip(groups, keys):
         heads = headlines(g)
-        moments.append({"start": str(g[0]["day"]), "end": str(g[-1]["day"]), "count": len(g),
+        moments.append({"start": str(g[0]["day"]), "end": str(g[-1]["day"]), "last": g[-1]["time"], "count": len(g),
+                        "outlets": len({a["source"] for a in g}),  # source strength (D-042)
                         "label": labels.get(k) or trim(heads[0]["title"]), "labelled": k in labels,
                         "heads": heads[:HEADS], "more": max(0, len(heads) - HEADS)})
-    return {"mode": "path" if len(articles) >= MIN_PATH else "list", "moments": moments}
+    summary = rows(conn, "SELECT summary FROM story_summaries WHERE moment_key = %s", (keys[-1],)) if keys else []
+    return {"mode": "path" if len(articles) >= MIN_PATH else "list", "moments": moments,
+            "summary": summary[0][0] if summary else None}
 
 
 def label_moment(conn, client: httpx.Client, issue_id: int, group: list[dict]) -> str:
