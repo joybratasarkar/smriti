@@ -1,19 +1,12 @@
 ---
 name: refresh
-description: Refresh Smriti's data by running the pipeline in order (fetch, embed, group) and report what changed. Use when the user says refresh, update the news, or run the pipeline.
+description: Refresh Smriti's data by running the whole pipeline (python -m app.refresh) and report what changed. Use when the user says refresh, update the news, or run the pipeline.
 disable-model-invocation: true
 ---
 
-Run Smriti's data pipeline from the project root, in this order. Each stage only processes new work, so re-running is safe.
+Run Smriti's data pipeline from the project root with `.venv/bin/python -m app.refresh` (in the background: a catch-up after days without a fetch takes hours). It runs every stage in order (fetch, embed, group, categories, links, LLM text), stops at the first that fails, and ends with the `app.check` health report. Each stage only processes new work, so re-running is safe; a second run won't start while one is going.
 
-1. Record the counts before running:
-   `.venv/bin/python -m app.stats` (note total articles), and the issue count from `.venv/bin/python -m app.issues --top 0`.
-2. `.venv/bin/python -m app.fetch` (RSS, last 7 days). Add `--gdelt` only if the user asks.
-3. `.venv/bin/python -m app.embed`
-4. `.venv/bin/python -m app.group`
-5. If later pipeline stages exist (for example extraction or issue merging), check `PROGRESS.md` for their commands and run them after grouping, in the order listed there.
-
-Stop at the first stage that fails. Show its error, and don't run later stages on partial data.
+Step output is in `logs/refresh/<start time>/<step>.out`. If a stage failed, show its error from that file and don't rerun later stages by hand on partial data.
 
 At the end, report briefly:
 - new articles, and feeds that failed or returned nothing (from the fetch output and `logs/fetch.log`)

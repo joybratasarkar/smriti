@@ -271,20 +271,23 @@ def progress(conn) -> None:
         print(f"{stratum:8}" + "".join(f"{c.get(col, 0):>12}" for col in columns) + f"{sum(c.values()):>8}")
 
 
-def scores(rows, predict) -> str:
-    """Confusion counts and precision / recall of `predict` against the same_story label (row[2])."""
+def confusion(rows, predict) -> tuple[int, int, int, int, float, float]:
+    """(TP, FP, FN, TN, precision, recall) of `predict` against the same_story label (row[2])."""
     c = Counter((r[2] == "same_story", bool(predict(r))) for r in rows)
     tp, fp, fn, tn = c[(True, True)], c[(False, True)], c[(True, False)], c[(False, False)]
-    p = tp / (tp + fp) if tp + fp else 0.0
-    rc = tp / (tp + fn) if tp + fn else 0.0
+    return tp, fp, fn, tn, tp / (tp + fp) if tp + fp else 0.0, tp / (tp + fn) if tp + fn else 0.0
+
+
+def scores(rows, predict) -> str:
+    tp, fp, fn, tn, p, rc = confusion(rows, predict)
     f1 = 2 * p * rc / (p + rc) if p + rc else 0.0
     return f"TP {tp:3} FP {fp:3} FN {fn:3} TN {tn:3} | precision {p:.2f} recall {rc:.2f} F1 {f1:.2f} " \
            f"accuracy {(tp + tn) / len(rows):.2f}"
 
 
-def stories(conn) -> None:
-    """Score the stories in the database: a gold pair counts as grouped when both articles are in one story."""
-    rows = conn.execute("""
+def story_rows(conn) -> list[tuple]:
+    """Labelled gold pairs with (id, stratum, label, grouped together, link type, title a, title b)."""
+    return conn.execute("""
         SELECT g.id, g.stratum, g.label, ia.issue_id = ib.issue_id,
                (SELECT l.link_type FROM issue_links l
                 WHERE (l.from_issue, l.to_issue) IN ((ia.issue_id, ib.issue_id), (ib.issue_id, ia.issue_id))),
@@ -294,6 +297,11 @@ def stories(conn) -> None:
         JOIN articles a ON a.id = g.article_a JOIN articles b ON b.id = g.article_b
         WHERE g.label IS NOT NULL AND g.label <> 'unsure'
     """).fetchall()
+
+
+def stories(conn) -> None:
+    """Score the stories in the database: a gold pair counts as grouped when both articles are in one story."""
+    rows = story_rows(conn)
     if not rows:
         print("No labelled gold pairs in stories yet.")
         return

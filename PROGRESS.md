@@ -32,6 +32,7 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 
 | What | Command |
 |---|---|
+| Refresh all + health report | `python -m app.refresh` (cron, twice a day); report alone: `python -m app.check`; logs in `logs/refresh/<time>/` |
 | Fetch news | `python -m app.fetch` (RSS, 7 days; `--days N`; `--gdelt` adds GDELT bulk files) |
 | Check stored articles | `python -m app.stats` |
 | Embed new articles | `python -m app.embed` (bge-m3 on GPU) |
@@ -47,11 +48,11 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 | Review issues / LLM test | `python -m app.issues` (`--top 30`, `--id 42`) · `python -m app.llm_test` (`--limit 10`) |
 | API + frontend | `nohup .venv/bin/uvicorn app.api:app --reload --port 8010 > logs/api.log 2>&1 &` and `(cd frontend && nohup npm run dev > ../logs/frontend.log 2>&1 &)`; stop with `pkill -f "uvicorn app.api"; pkill -f vite` |
 
-Refresh data: fetch → embed → group → categories (classifier, then `--stories`) → links → front titles (`/refresh` still lists only fetch → embed → group).
+Refresh data: `python -m app.refresh` runs fetch → embed → group → categories → links → LLM categories, link names, dot labels, titles and summaries, then `app.check`.
 
 ## Environment quirks
 
 - Postgres 16 on port **5433** (db and role `smriti`). Port 5432 is a PG15 cluster for SonarQube: don't touch it. Create databases with `TEMPLATE template0`.
 - GPU: GTX 1650, 4 GB VRAM; 7.1 GB system RAM. Models above ~4B don't fit. Ollama 0.40.2.
 - Git: branch `main`, pushed to https://github.com/joybratasarkar/smriti (public since 2026-11-15, AGPL-3.0, D-039).
-- Claude Code: `/status` (read-only), `/handoff` (docs, commit, push), `/refresh`, `/grill-me`, `/grilling`; caveman installed globally (`/caveman`, "normal mode" to stop; telemetry on).
+- Claude Code: `/status` (read-only), `/handoff` (docs, commit, push), `/refresh` (runs `python -m app.refresh`), `/grill-me`, `/grilling`; caveman installed globally (`/caveman`, "normal mode" to stop; telemetry on).

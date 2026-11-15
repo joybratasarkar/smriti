@@ -83,6 +83,8 @@ Run from the project root with the virtualenv active.
 
 | What | Command |
 |---|---|
+| Refresh everything (fetch → … → titles), then a health report | `python -m app.refresh` (what the twice-daily cron job runs) |
+| Health report only | `python -m app.check` (fresh news? empty feeds? a story grown huge? AI text rejected? gold set worse?) |
 | Fetch news (RSS, last 7 days) | `python -m app.fetch` (`--days N`; `--gdelt` adds GDELT bulk files) |
 | Check stored articles | `python -m app.stats` |
 | Embed new articles | `python -m app.embed` |
@@ -100,7 +102,7 @@ Run from the project root with the virtualenv active.
 | API | `uvicorn app.api:app --reload --port 8010` |
 | Frontend | `cd frontend && npm run dev`, then open http://localhost:5173 |
 
-To refresh the data, run fetch → embed → group → categories → links → front titles in that order. `app.group` needs the fine-tuned model in `models/ce-same-story/`, built from teacher labels (`python -m app.teach --sample N`, then `--label`) and `python -m app.train`. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
+To refresh the data, run `python -m app.refresh`, or the steps by hand: fetch → embed → group → categories → links → front titles. `app.group` needs the fine-tuned model in `models/ce-same-story/`, built from teacher labels (`python -m app.teach --sample N`, then `--label`) and `python -m app.train`. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
 
 ## Layout
 

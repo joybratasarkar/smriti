@@ -256,6 +256,12 @@ Teacher and student, as for grouping. Run after every `app.group`.
 2. **Student** (`python -m app.categories`): a softmax regression on the labelled articles' bge-m3 vectors (5-fold agreement with the LLM logged) labels every story's centroid in seconds (`category_by = 'classifier'`). 71% agreement, Sports almost never predicted (I-025).
 3. **Front-page stories** (`--stories`): the LLM labels each front-page story from its main headlines (`category_by = 'llm'`), overriding the classifier.
 
+## 5f. Automatic refresh and health report (`app/refresh.py`, `app/check.py`, D-032)
+
+`python -m app.refresh` runs the pipeline in order, each step in its own process (GPU memory is freed between them), and stops at the first step that fails: fetch (RSS for 2 days, GDELT files not read yet) → embed → group → categories (classifier) → links (changed stories only) → categories of the front-page stories (LLM) → names for 100 links → dot labels (300 biggest stories) → titles and summaries (60 top stories). Output per step in `logs/refresh/<start>/<step>.out`. A lock (`logs/refresh.lock`, `flock`) keeps a second run from starting while one is going. A cron job runs it twice a day.
+
+`python -m app.check` (run by `app.refresh` at the end, also after a failure) reads, never writes, and warns ("!") when: the last fetch is over 24 hours old; an RSS feed brought no new article; a story grew by more than 300 articles in the run or past 1,000 (I-001); fewer than 60% of the 60 top front-page stories have an AI title and summary (I-022); gold-set precision or recall fell by more than 0.03 since the last report. Its numbers go to `logs/checks.jsonl` for that comparison.
+
 ---
 
 ## 6. API (`app/api.py`)
