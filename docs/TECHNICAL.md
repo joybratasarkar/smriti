@@ -159,7 +159,7 @@ Used only to measure grouping models, never to train them.
 | `label` | TEXT | `same_story`, `follow_up`, `same_actor`, `same_topic`, `unrelated`, `unsure` (unsure is left out of scoring); NULL until labelled |
 | `labeled_at`, `created_at` | TIMESTAMPTZ | |
 
-The labelling tool hides the cosine and stratum, shows pairs in shuffled order, and asks for the first label that fits.
+The labelling tool hides the cosine and stratum, shows pairs in shuffled order, and asks for the first label that fits. `--stories` scores the stories in the database: a pair counts as grouped when both articles are in one story (also with links). `--export` writes the labelled pairs to `data/gold_pairs.csv` as stratum, cosine, label and the two URLs, with no titles or snippets; `--import` adds them to another database where both URLs have been fetched, never a pair already in `train_pairs`.
 
 ### `train_pairs`: LLM-labelled article pairs (G-4, `app/teach.py`)
 

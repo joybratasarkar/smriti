@@ -42,7 +42,7 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 | Categories (D-036) | `python -m app.categories --label N` (LLM labels N articles), then `python -m app.categories` (classifier, all stories) and `--stories` (LLM, front-page stories); run after grouping |
 | Teacher labels (G-4) | `python -m app.teach` (progress), `--sample N`, `--names N` (shared-name pairs), `--label` |
 | Fine-tune (G-5) | `python -m app.train` → `models/ce-same-story/` (needed by `app.group`) |
-| Gold set (G-2) | `python -m app.gold` (progress), `--sample N`, `--label` |
+| Gold set (G-2) | `python -m app.gold` (progress), `--sample N`, `--label`; `--stories` scores the stories; `--export` / `--import data/gold_pairs.csv` |
 | Compare models (G-3) | `python -m app.compare` (`--methods ...`); per-pair scores in `logs/compare_<date>.jsonl` |
 | Review issues / LLM test | `python -m app.issues` (`--top 30`, `--id 42`) · `python -m app.llm_test` (`--limit 10`) |
 | API + frontend | `nohup .venv/bin/uvicorn app.api:app --reload --port 8010 > logs/api.log 2>&1 &` and `(cd frontend && nohup npm run dev > ../logs/frontend.log 2>&1 &)`; stop with `pkill -f "uvicorn app.api"; pkill -f vite` |

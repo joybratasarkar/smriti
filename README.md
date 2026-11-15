@@ -80,6 +80,8 @@ Run from the project root with the virtualenv active.
 | Front-page titles | `python -m app.front --titles N` |
 | Timeline labels | `python -m app.moments --label N` |
 | Gold set, model comparison | `python -m app.gold` (`--sample N`, `--label`), `python -m app.compare` |
+| Score the stories on the gold set | `python -m app.gold --stories` |
+| Load the shared gold set | `python -m app.gold --import data/gold_pairs.csv` (pairs whose two URLs you have fetched) |
 | Review stories, LLM test | `python -m app.issues` (`--top 30`, `--id 42`), `python -m app.llm_test` (`--limit 10`) |
 | API | `uvicorn app.api:app --reload --port 8010` |
 | Frontend | `cd frontend && npm run dev`, then open http://localhost:5173 |
@@ -93,10 +95,13 @@ app/          Python: fetch, embed, teach/train, group, links, categories, front
 frontend/     Svelte UI (front page, story list, story page with a timeline)
 models/       fine-tuned cross-encoder (git-ignored; build it with app.teach + app.train)
 schema.sql    all tables; the only schema file
+data/         gold_pairs.csv: the hand-checked gold set as URLs and labels (no article text)
 feeds.txt     RSS sources
 docs/         issues, decisions, diagrams, technical notes
 logs/         run logs (git-ignored)
 ```
+
+The docs cite files in `logs/` (run scripts, gold-check output) as evidence. They stay on the developer's machine and are not published.
 
 ## Data and copyright
 

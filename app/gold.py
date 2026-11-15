@@ -3,6 +3,9 @@
 Run with:  python -m app.gold                 (progress: labels per stratum)
            python -m app.gold --sample 200    (add 200 new pairs)
            python -m app.gold --label         (label pairs in the terminal; stop any time, resume later)
+           python -m app.gold --stories       (how the stories in the database score on the gold set)
+           python -m app.gold --export data/gold_pairs.csv   (labelled pairs as URLs, to share without the database)
+           python -m app.gold --import data/gold_pairs.csv   (add them to this database, where both URLs are stored)
 
 Pairs come in four equal strata, so the set holds both easy and hard cases:
   nearest an article and its most similar article from within 3 days (cosine 0.4-0.95): the decision
@@ -18,10 +21,11 @@ The two articles are at most 30 days apart. Cosine is the bge-m3 embedding from 
 """
 
 import argparse
+import csv
 import random
 import re
 import textwrap
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import numpy as np
 
@@ -234,15 +238,99 @@ def progress(conn) -> None:
         counts[stratum][lab] = count
     columns = list(LABELS.values()) + ["(not yet)"]
     print(f"{'stratum':8}" + "".join(f"{c:>12}" for c in columns) + f"{'total':>8}")
-    for stratum in ("nearest", "high", "middle", "low"):
+    for stratum in ("nearest", "high", "middle", "low", "name"):
         c = counts.get(stratum, {})
         print(f"{stratum:8}" + "".join(f"{c.get(col, 0):>12}" for col in columns) + f"{sum(c.values()):>8}")
+
+
+def scores(rows, predict) -> str:
+    """Confusion counts and precision / recall of `predict` against the same_story label (row[2])."""
+    c = Counter((r[2] == "same_story", bool(predict(r))) for r in rows)
+    tp, fp, fn, tn = c[(True, True)], c[(False, True)], c[(True, False)], c[(False, False)]
+    p = tp / (tp + fp) if tp + fp else 0.0
+    rc = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * p * rc / (p + rc) if p + rc else 0.0
+    return f"TP {tp:3} FP {fp:3} FN {fn:3} TN {tn:3} | precision {p:.2f} recall {rc:.2f} F1 {f1:.2f} " \
+           f"accuracy {(tp + tn) / len(rows):.2f}"
+
+
+def stories(conn) -> None:
+    """Score the stories in the database: a gold pair counts as grouped when both articles are in one story."""
+    rows = conn.execute("""
+        SELECT g.id, g.stratum, g.label, ia.issue_id = ib.issue_id,
+               (SELECT l.link_type FROM issue_links l
+                WHERE (l.from_issue, l.to_issue) IN ((ia.issue_id, ib.issue_id), (ib.issue_id, ia.issue_id))),
+               left(a.title, 70), left(b.title, 70)
+        FROM gold_pairs g
+        JOIN article_issues ia ON ia.article_id = g.article_a JOIN article_issues ib ON ib.article_id = g.article_b
+        JOIN articles a ON a.id = g.article_a JOIN articles b ON b.id = g.article_b
+        WHERE g.label IS NOT NULL AND g.label <> 'unsure'
+    """).fetchall()
+    if not rows:
+        print("No labelled gold pairs in stories yet.")
+        return
+    print(len(rows), "gold pairs,", sum(r[2] == "same_story" for r in rows), "same_story")
+    print("grouped together           ", scores(rows, lambda r: r[3]))
+    print("together or linked         ", scores(rows, lambda r: r[3] or r[4] not in (None, "unrelated")))
+    print("together or same_story link", scores(rows, lambda r: r[3] or r[4] == "same_story"))
+    for s in ("nearest", "high", "middle", "low", "name"):
+        sub = [r for r in rows if r[1] == s]
+        if sub:
+            print(f"  {s:8} ({len(sub):2})", scores(sub, lambda r: r[3]))
+    print("\nSplit: same story in gold, different stories in the app (link between them):")
+    for r in rows:
+        if r[2] == "same_story" and not r[3]:
+            print(f"  #{r[0]:<4} [{r[4] or 'no link'}] {r[5]}  ||  {r[6]}")
+    print("\nWrongly together: grouped, but gold says otherwise:")
+    for r in rows:
+        if r[2] != "same_story" and r[3]:
+            print(f"  #{r[0]:<4} [{r[2]}] {r[5]}  ||  {r[6]}")
+
+
+EXPORT_COLUMNS = ["stratum", "cosine", "label", "url_a", "url_b"]
+
+
+def export(conn, path: str) -> None:
+    """Labelled gold pairs as URLs and labels only: no titles or snippets, so no article text is published."""
+    rows = conn.execute("""
+        SELECT g.stratum, round(g.cosine::numeric, 4), g.label, a.url, b.url FROM gold_pairs g
+        JOIN articles a ON a.id = g.article_a JOIN articles b ON b.id = g.article_b
+        WHERE g.label IS NOT NULL ORDER BY g.id
+    """).fetchall()
+    with open(path, "w", newline="") as f:
+        out = csv.writer(f)
+        out.writerow(EXPORT_COLUMNS)
+        out.writerows(rows)
+    print(f"Wrote {len(rows)} labelled pairs to {path}")
+
+
+def import_pairs(conn, path: str) -> None:
+    """Add exported pairs whose two URLs are both in this database's articles; pairs already there are kept."""
+    added = missing = 0
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            ids = conn.execute("SELECT id FROM articles WHERE url IN (%s, %s)", (row["url_a"], row["url_b"])).fetchall()
+            if len(ids) != 2:
+                missing += 1
+                continue
+            a, b = sorted(i for (i,) in ids)
+            added += conn.execute("""
+                INSERT INTO gold_pairs (article_a, article_b, stratum, cosine, label, labeled_at)
+                SELECT %s, %s, %s, %s, %s, now()
+                WHERE NOT EXISTS (SELECT 1 FROM train_pairs WHERE article_a = %s AND article_b = %s)
+                ON CONFLICT (article_a, article_b) DO NOTHING
+            """, (a, b, row["stratum"], float(row["cosine"]), row["label"], a, b)).rowcount
+    conn.commit()
+    print(f"Added {added} pairs; {missing} skipped because an article is not in this database")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sample", type=int, metavar="N", help="add N new pairs")
     parser.add_argument("--label", action="store_true", help="label pairs in the terminal")
+    parser.add_argument("--stories", action="store_true", help="score the stories in the database on the gold set")
+    parser.add_argument("--export", metavar="CSV", help="write the labelled pairs (URLs and labels) to CSV")
+    parser.add_argument("--import", dest="import_csv", metavar="CSV", help="add pairs from an exported CSV")
     args = parser.parse_args()
 
     with connect_with_vectors() as conn:
@@ -251,7 +339,14 @@ def main() -> None:
             sample(conn, {"nearest": n // 4, "high": n // 4, "middle": n - 3 * (n // 4), "low": n // 4})
         if args.label:
             label(conn)
-        progress(conn)
+        if args.import_csv:
+            import_pairs(conn, args.import_csv)
+        if args.export:
+            export(conn, args.export)
+        if args.stories:
+            stories(conn)
+        else:
+            progress(conn)
 
 
 if __name__ == "__main__":
