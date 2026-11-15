@@ -281,11 +281,11 @@ The API is FastAPI, read-only, and returns JSON. Run it with `uvicorn app.api:ap
 
 ## 7. Frontend and timeline (`frontend/`)
 
-The frontend uses Svelte 5 (runes: `$state`, `$derived`, `$effect`) and Vite 6, with no router library or UI framework. The dev server runs on :5173 and proxies `/api` to :8010 (`vite.config.js`, port configurable with `API_PORT`).
+The frontend uses Svelte 5 (runes: `$state`, `$derived`, `$effect`) and Vite 6, with no router library or UI framework. Look (D-043): colour tokens for light and dark at the top of `app.css` (peacock teal accent, ink masthead), Manrope from `@fontsource-variable/manrope` (self-hosted), the logo in `Logo.svelte` and `public/favicon.svg`; moments are rounded squares and "now" is a diamond, as in the logo. The dev server runs on :5173 and proxies `/api` to :8010 (`vite.config.js`, port configurable with `API_PORT`).
 
 ### Routing (`App.svelte`)
 
-A minimal hash router: `#/` is the front page, `#/topic/Sports` one category tab, `#/topic/Sports/India` that tab in one region (`#/topic/Top/World`: every category), `#/all` every story, `#/search/<words>` the search results (the list with that search), and `#/issues/42` one story. The top bar (D-032) has the name (logo "S", D-038), the topic tabs from `/api/front?limit=0`, a search box that goes to `#/search/…`, and "checked HH:MM", which turns amber ("news may be out of date · last checked 20 Oct") when the last fetch is more than 24 hours old.
+A minimal hash router: `#/` is the front page, `#/topic/Sports` one category tab, `#/topic/Sports/India` that tab in one region (`#/topic/Top/World`: every category), `#/all` every story, `#/search/<words>` the search results (the list with that search), and `#/issues/42` one story. The top bar (D-032) has the logo and name (D-043), the topic tabs from `/api/front?limit=0`, a search box that goes to `#/search/…`, and "checked HH:MM", which turns amber ("news may be out of date · last checked 20 Oct") when the last fetch is more than 24 hours old.
 
 ### Front page (`FrontPage.svelte`, `StoryCard.svelte`)
 

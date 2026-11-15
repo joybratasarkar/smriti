@@ -2,6 +2,7 @@
   import FrontPage from './FrontPage.svelte'
   import IssueList from './IssueList.svelte'
   import IssueDetail from './IssueDetail.svelte'
+  import Logo from './Logo.svelte'
   import { getJSON, formatDay, formatTime } from './lib/format.js'
 
   // Minimal hash router: #/ is the front page, #/topic/Sports one category tab, #/topic/Sports/India
@@ -33,11 +34,12 @@
   }
 </script>
 
-<header class="topbar">
-  <a href="#/" class="brand">
-    <span class="mark">S</span>
+<header class="masthead">
+<div class="topbar">
+  <a href="#/" class="brand" aria-label="Smriti, today's stories">
+    <Logo />
     <span>
-      <strong>Smriti</strong>
+      <strong>smriti</strong>
       <small>news that remembers</small>
     </span>
   </a>
@@ -53,12 +55,13 @@
   {#if top}
     <p class="checked" class:stale>
       {#if stale}
-        news may be out of date · last checked {formatDay(top.checked)}
+        news may be out of date · last updated {formatDay(top.checked)}
       {:else}
-        checked {formatTime(top.checked)}
+        updated {formatTime(top.checked)}
       {/if}
     </p>
   {/if}
+</div>
 </header>
 
 <main class:wide={!issueId && !all}>
