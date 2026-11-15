@@ -32,7 +32,7 @@ From the project root with `source .venv/bin/activate`. Every script creates/upd
 
 | What | Command |
 |---|---|
-| Refresh all + health report | `python -m app.refresh` (cron, twice a day); report alone: `python -m app.check`; logs in `logs/refresh/<time>/` |
+| Refresh all + health report | `python -m app.refresh` (cron at 07:13 and 19:13, `crontab -l`); report alone: `python -m app.check`; logs in `logs/refresh/<time>/` |
 | Fetch news | `python -m app.fetch` (RSS, 7 days; `--days N`; `--gdelt` adds GDELT bulk files) |
 | Check stored articles | `python -m app.stats` |
 | Embed new articles | `python -m app.embed` (bge-m3 on GPU) |
