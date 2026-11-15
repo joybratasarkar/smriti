@@ -1,6 +1,6 @@
 httpx==0.28.1
 feedparser==6.0.14
-psycopg[binary]==3.3.6
+psycopg[binary]==3.3.8
 python-dotenv==1.2.4
 fastembed==0.9.1
 numpy==2.5.3
