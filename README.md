@@ -69,22 +69,29 @@ Run from the project root with the virtualenv active.
 
 | What | Command |
 |---|---|
-| Fetch news (RSS, last 7 days) | `python -m app.fetch` (`--days N`, `--gdelt`) |
+| Fetch news (RSS, last 7 days) | `python -m app.fetch` (`--days N`; `--gdelt` adds GDELT bulk files) |
 | Check stored articles | `python -m app.stats` |
 | Embed new articles | `python -m app.embed` |
-| Group into issues | `python -m app.group` (`--threshold 0.7`, `--reset`) |
-| Review issues | `python -m app.issues` (`--top 30`, `--id 42`) |
-| LLM extraction test | `python -m app.llm_test` (`--limit 10`) |
+| Teacher labels for training | `python -m app.teach` (progress), `--sample N`, `--names N`, `--label` |
+| Fine-tune the cross-encoder | `python -m app.train` → `models/ce-same-story/` |
+| Group into stories | `python -m app.group` (`--reset` regroups everything) |
+| Story links | `python -m app.links` (`--types N`: the LLM names the N strongest) |
+| Categories | `python -m app.categories --label N`, then `python -m app.categories`, then `--stories` |
+| Front-page titles | `python -m app.front --titles N` |
+| Timeline labels | `python -m app.moments --label N` |
+| Gold set, model comparison | `python -m app.gold` (`--sample N`, `--label`), `python -m app.compare` |
+| Review stories, LLM test | `python -m app.issues` (`--top 30`, `--id 42`), `python -m app.llm_test` (`--limit 10`) |
 | API | `uvicorn app.api:app --reload --port 8010` |
 | Frontend | `cd frontend && npm run dev`, then open http://localhost:5173 |
 
-To refresh the data, run fetch → embed → group → categories → links → front titles in that order (the full list of commands is in [`PROGRESS.md`](PROGRESS.md)). `app.group` needs the fine-tuned model in `models/ce-same-story/`, built from teacher labels (`python -m app.teach --sample N`, then `--label`) and `python -m app.train`. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
+To refresh the data, run fetch → embed → group → categories → links → front titles in that order. `app.group` needs the fine-tuned model in `models/ce-same-story/`, built from teacher labels (`python -m app.teach --sample N`, then `--label`) and `python -m app.train`. Feeds are listed in `feeds.txt` (`name | url`); add a line to add a source.
 
 ## Layout
 
 ```
-app/          Python: fetch, embed, group, api, review tools, llm_test
-frontend/     Svelte UI (issue list, timeline per issue)
+app/          Python: fetch, embed, teach/train, group, links, categories, front, api, review tools
+frontend/     Svelte UI (front page, story list, story page with a timeline)
+models/       fine-tuned cross-encoder (git-ignored; build it with app.teach + app.train)
 schema.sql    all tables; the only schema file
 feeds.txt     RSS sources
 docs/         issues, decisions, diagrams, technical notes

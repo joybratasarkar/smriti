@@ -9,23 +9,28 @@ _Last updated: 2026-10-26. Covers Step 1, Step 2 and the read-only web app._
 ## 1. Pipeline overview
 
 ```
- feeds.txt (16 RSS feeds)
+ feeds.txt (RSS feeds) + optional GDELT
         │
         ▼
- app.fetch   ──►  articles               (links + metadata only, deduped by URL)
+ app.fetch       ──►  articles               (links + metadata only, deduped by URL)
         │
         ▼
- app.embed   ──►  article_embeddings     (384-d multilingual vectors, pgvector)
+ app.embed       ──►  article_embeddings     (bge-m3, 1024-d, pgvector)
         │
         ▼
- app.group   ──►  issues + article_issues (incremental clustering by cosine similarity)
+ app.group       ──►  issues + article_issues (towers find candidates; the fine-tuned
+        │                                      cross-encoder decides "same story?")
+        ▼
+ app.categories  ──►  story categories       (classifier on bge-m3 vectors)
+ app.links       ──►  issue_links            (edges between related stories)
+ app.front       ──►  story_titles           (LLM titles for the front page)
         │
         ▼
  app.api (FastAPI, :8010)  ──►  frontend (Svelte 5 + Vite, :5173)
-                                 issue list + per-issue timeline
+                                 front page, story list, story page with a timeline
 ```
 
-Each stage is a separate command. Each one picks up only new work and is safe to re-run. The order is always **fetch → embed → group**.
+Each stage is a separate command. Each one picks up only new work and is safe to re-run. The order is **fetch → embed → group → categories → links → front titles**. `app.group` needs the fine-tuned model from `app.teach` + `app.train` (section 5a).
 
 ---
 
@@ -297,9 +302,9 @@ An All / India / World switch, one lead card (bigger title and the mini dot-path
 ## 8. Configuration and environment
 
 - **`.env`:** `DATABASE_URL=postgresql://smriti:<password>@localhost:5433/smriti`. It is gitignored; the template is `.env.example`. No API keys are needed yet, because RSS and GDELT require none.
-- **Python dependencies** (`requirements.txt`, pinned): `httpx`, `feedparser`, `psycopg[binary]`, `python-dotenv`, `fastembed`, `numpy`, `pgvector`, `fastapi`, `uvicorn`, `trafilatura` (full text for the LLM test, in memory only). Installed in `.venv/`.
+- **Python dependencies** (`requirements.txt`, pinned): `httpx`, `feedparser`, `psycopg[binary]`, `python-dotenv`, `fastembed` (only the old MiniLM baseline in `app/compare.py`), `numpy`, `pgvector`, `fastapi`, `uvicorn`, `trafilatura` (full text for the LLM test, in memory only), `torch` and `transformers` (bge-m3 and the cross-encoder). Installed in `.venv/`.
 - **Frontend dependencies:** `svelte` 5.57, `vite` 6.4, `@sveltejs/vite-plugin-svelte` 5.1.
-- **Postgres quirks:** this cluster is on 5433; the PG15 cluster on 5432 belongs to SonarQube. Create databases from `template0` (glibc collation mismatch). The `vector` extension was created once as superuser.
+- **Postgres quirks:** the developer's machine runs this database on port 5433 because another Postgres uses 5432; set your own port in `DATABASE_URL`. Create databases from `template0` (glibc collation mismatch). The `vector` extension was created once as superuser.
 - **Logs:** `logs/fetch.log`, `logs/api.log`, `logs/frontend.log`.
 
 ---
@@ -325,7 +330,7 @@ Cross-encoders score both orders (a, b) and (b, a) and average them, because a l
 
 ## 10. Not built yet (planned)
 
-- **Grouping model (MVP):** built and run (sections 5 to 5b). Still to do: measure it on the gold set and set the cut-offs (G-3), fix one event split into parallel stories (I-016), a multi-hop graph query (`WITH RECURSIVE` over `issue_links`), and the LLM referee for uncertain cases (D-024).
+- **Grouping model (MVP):** built and run (sections 5 to 5b). Measured on the gold set (story precision 0.91, recall 0.70; see PROGRESS.md). Still to do: better recall, as one event still splits into parallel stories (I-016), a multi-hop graph query (`WITH RECURSIVE` over `issue_links`), and the LLM referee for uncertain cases (D-024).
 - **Step 3 (Understand, LLM):** extract structured events from each article: who, what, when, action type, exact quote, and source URL. Being tested with `app/llm_test.py` (D-016 to D-020).
 - **Step 4 (Remember, graph in Postgres):** Issue → Events → People / Organizations / Places, with every event linked to its source articles. Store attributed facts, not conclusions.
 - **Scheduling:** fetch, embed and group are run by hand for now.

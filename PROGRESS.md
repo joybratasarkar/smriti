@@ -53,5 +53,5 @@ Refresh data: fetch → embed → group → categories (classifier, then `--stor
 
 - Postgres 16 on port **5433** (db and role `smriti`). Port 5432 is a PG15 cluster for SonarQube: don't touch it. Create databases with `TEMPLATE template0`.
 - GPU: GTX 1650, 4 GB VRAM; 7.1 GB system RAM. Models above ~4B don't fit. Ollama 0.40.2.
-- Git: branch `main`, pushed to private https://github.com/joybratasarkar/smriti.
+- Git: branch `main`, pushed to https://github.com/joybratasarkar/smriti (public since 2026-11-15, AGPL-3.0, D-039).
 - Claude Code: `/status` (read-only), `/handoff` (docs, commit, push), `/refresh`, `/grill-me`, `/grilling`; caveman installed globally (`/caveman`, "normal mode" to stop; telemetry on).
