@@ -8,7 +8,7 @@
 
   // When the news was last fetched: "quiet" is measured against it (I-021).
   let checked = $state(null)
-  getJSON('/api/summary').then((s) => (checked = s.last_fetched)).catch(() => {})
+  getJSON('/api/front?limit=0').then((f) => (checked = f.checked)).catch(() => {})  // news the stories cover (I-027)
 
   let sort = $state('recent')
   // svelte-ignore state_referenced_locally
@@ -34,7 +34,7 @@
       issues = append ? [...issues, ...data.issues] : data.issues
       total = data.total
     } catch (e) {
-      error = `Could not load issues (${e.message}). Is the API running on port 8010?`
+      error = `Could not load stories (${e.message}). Is the API running on port 8010?`
     } finally {
       loading = false
     }
@@ -57,14 +57,14 @@
     <button class:active={sort === 'recent'} onclick={() => (sort = 'recent')}>Latest</button>
     <button class:active={sort === 'biggest'} onclick={() => (sort = 'biggest')}>Most covered</button>
   </div>
-  <label class="check"><input type="checkbox" bind:checked={showSingles} /> single-article stories</label>
+  <label class="check"><input type="checkbox" bind:checked={showSingles} /> single-report stories</label>
 </div>
 
 {#if error}
   <p class="error">{error}</p>
 {/if}
 
-<p class="count">{total.toLocaleString()} {total === 1 ? 'issue' : 'issues'}</p>
+<p class="count">{total.toLocaleString()} {total === 1 ? 'story' : 'stories'}</p>
 
 <ul class="issues">
   {#each issues as issue (issue.id)}
@@ -72,8 +72,8 @@
       <a href="#/issues/{issue.id}" class="card">
         <h2>{issue.label}</h2>
         <div class="card-meta">
-          <span class="pill">{issue.article_count} {issue.article_count === 1 ? 'article' : 'articles'}</span>
-          <span>{issue.source_count} {issue.source_count === 1 ? 'source' : 'sources'}</span>
+          <span class="pill">{issue.article_count} {issue.article_count === 1 ? 'report' : 'reports'}</span>
+          <span>{issue.source_count} {issue.source_count === 1 ? 'outlet' : 'outlets'}</span>
           <span>{formatDate(issue.first_seen)}{#if formatDate(issue.first_seen) !== formatDate(issue.last_seen)}{' – '}{formatDate(issue.last_seen)}{/if}</span>
           {#if checked && isQuiet(issue.last_seen, checked)}
             <span class="status quiet">quiet since {formatDay(issue.last_seen)}</span>
@@ -92,5 +92,5 @@
 {:else if issues.length < total}
   <button class="more" onclick={() => load(true)}>Show more</button>
 {:else if !issues.length && !error}
-  <p class="muted">No issues match.</p>
+  <p class="muted">No stories match.</p>
 {/if}

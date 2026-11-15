@@ -40,7 +40,10 @@ TABS = list(CATEGORIES)
 # Link path words that mark repeating columns and paid content.
 JUNK_SECTIONS = {"astrology", "horoscope", "brandhub", "pr-release", "trending", "trending-news"}
 JUNK_TITLE = re.compile(r"horoscope|rashifal|quote of the day|sensex today|nifty today|gold (rate|price)s? today|"
-                        r"silver (rate|price)s? today|petrol.*price.*today|lottery result|wishes|greetings", re.I)
+                        r"silver (rate|price)s? today|petrol.*price.*today|lottery result|wishes|greetings|"
+                        # shopping deals (I-028): "massive discount on Amazon", "price cut on Flipkart: know the deal"
+                        r"(massive|huge|big|flat) discount|(discount|price cut|deal|offer)s? on (amazon|flipkart)|"
+                        r"know the deal|best deals?\b|deal of the day|(amazon|flipkart) (sale|deal)", re.I)
 
 SYSTEM = ("You write headlines for a news front page read by people of every age. Given the main headlines of one "
           "news story, write ONE plain English title of 5 to 9 words saying what the story is about. Use only facts "

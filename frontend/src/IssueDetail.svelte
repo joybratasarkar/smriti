@@ -21,7 +21,7 @@
         issue = data
         open = data.moments.length  // start at "now": where the story stands
       })
-      .catch((e) => (error = e.message.startsWith('404') ? 'This issue does not exist.' : `Could not load issue (${e.message}).`))
+      .catch((e) => (error = e.message.startsWith('404') ? 'This story does not exist.' : `Could not load the story (${e.message}).`))
   })
 
   // A new dot shows its first few headlines again.
@@ -60,7 +60,7 @@
   }
 </script>
 
-<a href="#/" class="back">← All issues</a>
+<a href="#/" class="back">← Today's stories</a>
 
 {#if error}
   <p class="error">{error}</p>
@@ -68,7 +68,7 @@
   <p class="muted">Loading…</p>
 {:else}
   <section class="issue-head">
-    <h1>{issue.label}</h1>
+    <h1>{issue.title ?? issue.label}</h1>
     {#if issue.summary}<p class="summary">{issue.summary}</p>{/if}
     <p class="story-meta">
       {plural(issue.article_count, 'report')} ·

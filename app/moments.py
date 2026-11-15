@@ -57,9 +57,12 @@ def rows(conn, sql: str, params=()) -> list[tuple]:
 
 
 def checked(conn):
-    """When the news the stories cover was fetched: the newest article that is already in a story. While a refresh
-    runs, newer articles are fetched but not grouped yet; "today" and "no reports since" follow the stories."""
-    return rows(conn, "SELECT max(a.fetched_at) FROM articles a JOIN article_issues ai ON ai.article_id = a.id")[0][0]
+    """How far the stories' news reaches: the newest publish time among articles already in a story (I-027).
+    While a refresh runs, newer articles are fetched but not grouped yet, and a backfill groups old articles
+    fetched today, so neither the newest fetch nor the newest grouped fetch will do. A feed's future date
+    can't push it ahead: an article counts at most at the time we fetched it."""
+    return rows(conn, "SELECT max(least(coalesce(a.published_at, a.fetched_at), a.fetched_at)) "
+                      "FROM articles a JOIN article_issues ai ON ai.article_id = a.id")[0][0]
 
 
 def outlet_names(conn) -> dict[str, str]:
@@ -183,9 +186,11 @@ def story_moments(conn, issue_id: int, names: dict[str, str]) -> dict:
                         "outlets": len({a["source"] for a in g}),  # source strength (D-042)
                         "label": labels.get(k) or trim(heads[0]["title"]), "labelled": k in labels,
                         "heads": heads[:HEADS], "more": max(0, len(heads) - HEADS)})
-    summary = rows(conn, "SELECT summary FROM story_summaries WHERE moment_key = %s", (keys[-1],)) if keys else []
+    newest = keys[-1:]  # the AI title and summary belong to the story's newest moment (D-032, D-042)
+    title = rows(conn, "SELECT title FROM story_titles WHERE moment_key = ANY(%s)", (newest,))
+    summary = rows(conn, "SELECT summary FROM story_summaries WHERE moment_key = ANY(%s)", (newest,))
     return {"mode": "path" if len(articles) >= MIN_PATH else "list", "moments": moments,
-            "summary": summary[0][0] if summary else None}
+            "title": title[0][0] if title else None, "summary": summary[0][0] if summary else None}
 
 
 def label_moment(conn, client: httpx.Client, issue_id: int, group: list[dict]) -> str:

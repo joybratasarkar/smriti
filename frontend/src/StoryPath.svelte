@@ -61,7 +61,8 @@
     const branches = [...map.querySelectorAll('.sdot')].map((sd) => {
       const stop = sd.closest('.stop')
       const above = sd.closest('.side').previousElementSibling
-      const from = (above ?? (narrow ? stop.querySelector('.dot') : stop.querySelector('.reports'))).getBoundingClientRect()
+      // On a phone the side dots sit left of their text, so the line runs from dot to dot, not through the text.
+      const from = ((narrow ? above?.querySelector('.sdot') : above) ?? (narrow ? stop.querySelector('.dot') : stop.querySelector('.reports'))).getBoundingClientRect()
       const to = sd.getBoundingClientRect()
       return `M${from.left - box.left + from.width / 2},${from.bottom - box.top} L${to.left - box.left + to.width / 2},${to.top - box.top}`
     })

@@ -281,7 +281,7 @@ The API is FastAPI, read-only, and returns JSON. Run it with `uvicorn app.api:ap
 
 ## 7. Frontend and timeline (`frontend/`)
 
-The frontend uses Svelte 5 (runes: `$state`, `$derived`, `$effect`) and Vite 6, with no router library or UI framework. Look (D-043): colour tokens for light and dark at the top of `app.css` (peacock teal accent, ink masthead), Manrope from `@fontsource-variable/manrope` (self-hosted), the logo in `Logo.svelte` and `public/favicon.svg`; moments are rounded squares and "now" is a diamond, as in the logo. The dev server runs on :5173 and proxies `/api` to :8010 (`vite.config.js`, port configurable with `API_PORT`).
+The frontend uses Svelte 5 (runes: `$state`, `$derived`, `$effect`) and Vite 6, with no router library or UI framework. Look (D-043, D-044): colour tokens for light and dark at the top of `app.css` (white paper, near-black text, peacock teal only for the brand), Newsreader for headlines and Manrope for labels, both self-hosted from `@fontsource-variable`, the logo in `Logo.svelte` and `public/favicon.svg`; moments are rounded squares and "now" is a diamond, as in the logo. The dev server runs on :5173 and proxies `/api` to :8010 (`vite.config.js`, port configurable with `API_PORT`).
 
 ### Routing (`App.svelte`)
 
