@@ -35,6 +35,16 @@ Where things stand:
 - Ollama with Qwen3-4B-Instruct-2507 as the teacher and referee: labels training pairs, names story links, writes front-page titles and timeline labels, sorts categories
 - Svelte 5 + Vite for the frontend
 
+## Requirements
+
+- Linux or macOS (developed on Ubuntu 24.04)
+- Python 3.12
+- PostgreSQL 16 with the [pgvector](https://github.com/pgvector/pgvector) extension
+- An NVIDIA GPU with about 4 GB of VRAM for embedding, grouping and training (CPU works, but slowly), and about 8 GB of RAM
+- [Ollama](https://ollama.com) for the local LLM (labels, titles, categories)
+- Node.js 20+ for the frontend
+- About 10 GB of disk for the models (bge-m3, the cross-encoder and its fine-tuned copy, Qwen3-4B)
+
 ## Setup
 
 1. **Database.** PostgreSQL 16 with a database and role named `smriti`, then enable pgvector (needs a superuser):
@@ -91,4 +101,4 @@ Copyright (C) 2026 Joybrata Sarkar.
 
 Smriti is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You may use, change and share it. If you run a modified version as a network service, you must offer its source code to that service's users. For other licensing terms, including commercial use without AGPL obligations, contact the copyright holder through GitHub.
 
-Contributions are welcome under the [Contributor License Agreement](CONTRIBUTING.md). Security: see [SECURITY.md](SECURITY.md).
+Contributions are welcome under the [Contributor License Agreement](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Security: see [SECURITY.md](SECURITY.md).
